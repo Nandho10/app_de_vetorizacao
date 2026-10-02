@@ -1,0 +1,35 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Temporary storage, cache and exports
+app/storage/uploads/*
+!app/storage/uploads/.gitkeep
+app/storage/cache/*
+!app/storage/cache/.gitkeep
+app/storage/outputs/*
+!app/storage/outputs/.gitkeep
+test_outputs/
+
+# Temporary generated test plots
+cad_lines_test.png
+test_zero_gap.jpg
+zero_gap_43.png
+zero_gap_clean.png
+zero_gap_eps_*.png
+zero_gap_plot.png
+
+# Virtual environment / IDE
+.venv/
+env/
+venv/
+.idea/
+.vscode/
+
+# OS generated
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store

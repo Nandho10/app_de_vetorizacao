@@ -1,0 +1,780 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Vetorizador de Quadras Fiscais | GIS Inteligente</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- FontAwesome -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  
+  <!-- Leaflet CSS & JS -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <style>
+    #map {
+      height: 100%;
+      width: 100%;
+      background-color: #1e293b;
+      min-height: 520px;
+    }
+    .leaflet-container {
+      font-family: inherit;
+    }
+    /* Estilo de rotulo de lote */
+    .lot-label {
+      background: rgba(15, 23, 42, 0.85);
+      border: 1px solid #22c55e;
+      color: #f8fafc;
+      font-weight: 700;
+      font-size: 11px;
+      padding: 1px 5px;
+      border-radius: 4px;
+      text-align: center;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+    }
+    /* Scrollbar personalizada */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #0f172a;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #334155;
+      border-radius: 3px;
+    }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 flex flex-col h-screen overflow-hidden font-sans">
+
+  <!-- Top Navbar -->
+  <header class="bg-slate-900 border-b border-slate-800 px-6 py-3 flex items-center justify-between shadow-md z-20">
+    <div class="flex items-center space-x-3">
+      <div class="w-10 h-10 rounded-lg bg-emerald-600 flex items-center justify-center text-white shadow-lg shadow-emerald-900/30">
+        <i class="fa-solid fa-draw-polygon text-xl"></i>
+      </div>
+      <div>
+        <h1 class="text-lg font-bold tracking-tight text-white flex items-center gap-2">
+          Vetorizador de Quadras Fiscais
+          <span class="text-xs font-medium px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">Protótipo v1.0</span>
+        </h1>
+        <p class="text-xs text-slate-400">Conversão de plantas raster (.tif, .jpg, .png, .pdf) em vetores métricos GIS (.shp, .gpkg, .kml)</p>
+      </div>
+    </div>
+    <div class="flex items-center space-x-4 text-xs">
+      <span class="flex items-center text-slate-400">
+        <span class="w-2 h-2 rounded-full bg-emerald-500 mr-2 animate-pulse"></span>
+        Motor GIS (GDAL/Shapely): Ativo
+      </span>
+      <div class="h-4 w-px bg-slate-700"></div>
+      <span class="text-slate-400"><i class="fa-solid fa-map-location-dot mr-1 text-slate-300"></i> Datum: SIRGAS 2000</span>
+    </div>
+  </header>
+
+  <!-- Main Content Layout -->
+  <div class="flex flex-1 overflow-hidden">
+    
+    <!-- Left Sidebar: Controls -->
+    <aside class="w-96 bg-slate-900/90 border-r border-slate-800 flex flex-col overflow-y-auto p-4 space-y-4">
+      
+      <!-- Upload Card -->
+      <div class="bg-slate-800/80 rounded-xl p-4 border border-slate-700/60 shadow">
+        <h2 class="text-sm font-semibold text-slate-200 mb-2 flex items-center justify-between">
+          <span><i class="fa-solid fa-cloud-arrow-up mr-2 text-emerald-400"></i>Upload da Planta</span>
+          <span class="text-[11px] text-slate-400">TIF, JPG, PNG, PDF</span>
+        </h2>
+        
+        <!-- Drag & Drop Box -->
+        <div id="dropzone" class="border-2 border-dashed border-slate-600 hover:border-emerald-500 rounded-lg p-4 text-center cursor-pointer transition-colors bg-slate-900/40">
+          <input type="file" id="fileInput" class="hidden" accept=".pdf,.tif,.tiff,.jpg,.jpeg,.png">
+          <i class="fa-solid fa-file-arrow-up text-2xl text-slate-400 mb-1"></i>
+          <p class="text-xs font-medium text-slate-300">Arraste a planta aqui ou <span class="text-emerald-400 underline">busque</span></p>
+          <p id="currentFileName" class="text-[11px] text-emerald-400 mt-2 truncate font-mono hidden"></p>
+        </div>
+
+        <!-- Exemplos Rápidos -->
+        <div class="mt-3">
+          <span class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block mb-1.5">Ou use um dos exemplos da pasta:</span>
+          <div id="examplesList" class="flex flex-wrap gap-1.5">
+            <span class="text-xs text-slate-500">Carregando exemplos...</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Parâmetros Cartográficos -->
+      <div class="bg-slate-800/80 rounded-xl p-4 border border-slate-700/60 shadow space-y-3">
+        <h2 class="text-sm font-semibold text-slate-200 flex items-center justify-between">
+          <span><i class="fa-solid fa-sliders mr-2 text-emerald-400"></i>Parâmetros da Planta</span>
+        </h2>
+
+        <!-- Escala e DPI -->
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label class="text-[11px] font-medium text-slate-300 block mb-1">Escala da Prancha</label>
+            <select id="scaleSelect" onchange="toggleCustomScale(this.value)" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-emerald-500">
+              <option value="750" selected>1 : 750 (Carimbo Prancha)</option>
+              <option value="835">1 : 835 (Calibrado Digital)</option>
+              <option value="1000">1 : 1000</option>
+              <option value="500">1 : 500</option>
+              <option value="1250">1 : 1250</option>
+              <option value="2000">1 : 2000</option>
+              <option value="custom">Outra escala...</option>
+            </select>
+            <input type="number" id="customScaleInput" placeholder="Ex: 850" class="w-full mt-1 bg-slate-950 border border-emerald-500 rounded px-2 py-1 text-xs text-emerald-300 hidden">
+          </div>
+          <div>
+            <label class="text-[11px] font-medium text-slate-300 block mb-1">DPI Digitalização</label>
+            <input type="number" id="dpiInput" value="300" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-emerald-500">
+          </div>
+        </div>
+
+        <!-- Calibração Real por Cota Conhecida (Opcional) -->
+        <div class="p-2.5 bg-emerald-950/30 rounded-lg border border-emerald-800/40 space-y-1">
+          <div class="flex items-center justify-between">
+            <span class="text-[11px] font-semibold text-emerald-400"><i class="fa-solid fa-ruler-combined mr-1"></i>Calibrar por Cota Real</span>
+            <span class="text-[9px] bg-emerald-900/60 text-emerald-300 px-1.5 py-0.5 rounded">Recomendado</span>
+          </div>
+          <p class="text-[10px] text-slate-400 leading-tight">Compensa redução de scanner e gera a área de 182,38 m² exata:</p>
+          <div class="flex items-center gap-1.5 pt-1">
+            <input type="number" step="0.01" id="refCotaInput" placeholder="Ex: 7.00" class="w-20 bg-slate-900 border border-emerald-600/70 rounded px-2 py-1 text-xs text-emerald-300 font-mono focus:outline-none focus:border-emerald-400">
+            <span class="text-[11px] text-slate-300">m (frente padrão do lote)</span>
+          </div>
+        </div>
+
+        <!-- Sentido da Numeração -->
+        <div>
+          <label class="text-[11px] font-medium text-slate-300 block mb-1"><i class="fa-solid fa-arrow-down-1-9 mr-1 text-sky-400"></i>Sentido da Numeração</label>
+          <select id="sortModeSelect" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-emerald-500">
+            <option value="cadastral_ring" selected>Anel Cadastral (Topo 1..20, Dir 21..25, Base 26..43)</option>
+            <option value="scanline">Varredura Linear (Esquerda -> Direita)</option>
+          </select>
+        </div>
+
+        <!-- Identificação -->
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label class="text-[11px] font-medium text-slate-300 block mb-1">Código Quadra</label>
+            <input type="text" id="quadraCodeInput" value="QD-38" placeholder="Ex: QD-39" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-emerald-500">
+          </div>
+          <div>
+            <label class="text-[11px] font-medium text-slate-300 block mb-1">Bairro / Loteam.</label>
+            <input type="text" id="bairroInput" value="RESIDENCIAL JASMIM" placeholder="Ex: Vl. Vermont" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-emerald-500">
+          </div>
+        </div>
+
+        <!-- Configurações Avançadas de Visão -->
+        <details class="text-xs group">
+          <summary class="cursor-pointer text-slate-400 hover:text-slate-200 select-none flex items-center justify-between py-1">
+            <span><i class="fa-solid fa-wrench mr-1"></i> Ajustes do Algoritmo</span>
+            <i class="fa-solid fa-chevron-down text-[10px] transition-transform group-open:rotate-180"></i>
+          </summary>
+          <div class="pt-2 space-y-2 border-t border-slate-700/50 mt-2">
+            <div>
+              <div class="flex justify-between text-[11px] text-slate-300 mb-1">
+                <span>Filtro de Ruído de Traço</span>
+                <span id="sensValue" class="text-emerald-400 font-mono">45</span>
+              </div>
+              <input type="range" id="sensSlider" min="20" max="80" value="45" class="w-full accent-emerald-500">
+            </div>
+            <div>
+              <label class="text-[11px] font-medium text-slate-300 block mb-1">Área Mínima de Lote (m²)</label>
+              <input type="number" id="minAreaInput" value="10" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-slate-100">
+            </div>
+          </div>
+        </details>
+
+        <!-- Botão Processar -->
+        <button id="btnProcess" disabled class="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed font-semibold text-white rounded-lg shadow-lg shadow-emerald-900/40 transition-all flex items-center justify-center space-x-2 text-sm">
+          <i class="fa-solid fa-play"></i>
+          <span>Processar e Vetorizar</span>
+        </button>
+      </div>
+
+      <!-- Card de Resultados e Estatísticas -->
+      <div id="statsCard" class="bg-slate-800/80 rounded-xl p-4 border border-slate-700/60 shadow hidden space-y-3">
+        <h2 class="text-sm font-semibold text-slate-200 flex items-center justify-between">
+          <span><i class="fa-solid fa-chart-pie mr-2 text-emerald-400"></i>Resultados Obtidos</span>
+          <span class="text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full border border-emerald-500/30">Vetorizado</span>
+        </h2>
+        
+        <div class="grid grid-cols-2 gap-2 text-center">
+          <div class="bg-slate-900/80 p-2.5 rounded-lg border border-slate-700/40">
+            <span class="text-[10px] text-slate-400 uppercase tracking-wider block">Área da Quadra</span>
+            <span id="statAreaQuadra" class="text-base font-bold text-white">-</span>
+          </div>
+          <div class="bg-slate-900/80 p-2.5 rounded-lg border border-slate-700/40">
+            <span class="text-[10px] text-slate-400 uppercase tracking-wider block">Lotes Detectados</span>
+            <span id="statTotalLots" class="text-base font-bold text-emerald-400">-</span>
+          </div>
+          <div class="bg-slate-900/80 p-2.5 rounded-lg border border-slate-700/40">
+            <span class="text-[10px] text-slate-400 uppercase tracking-wider block">Perímetro</span>
+            <span id="statPerimQuadra" class="text-xs font-semibold text-slate-200">-</span>
+          </div>
+          <div class="bg-slate-900/80 p-2.5 rounded-lg border border-slate-700/40">
+            <span class="text-[10px] text-slate-400 uppercase tracking-wider block">Resolução Real</span>
+            <span id="statRes" class="text-xs font-semibold text-slate-200">-</span>
+          </div>
+        </div>
+
+        <!-- Downloads -->
+        <div class="pt-2 border-t border-slate-700/60 space-y-1.5">
+          <span class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block mb-1">Exportar Camadas:</span>
+          
+          <div class="grid grid-cols-2 gap-1.5">
+            <button onclick="downloadFormat('shapefile')" class="bg-slate-700 hover:bg-slate-600 text-slate-100 py-1.5 px-2.5 rounded-lg text-xs font-medium flex items-center justify-center space-x-1.5 border border-slate-600">
+              <i class="fa-solid fa-file-zipper text-amber-400"></i>
+              <span>Shapefile (.zip)</span>
+            </button>
+            <button onclick="downloadFormat('gpkg')" class="bg-slate-700 hover:bg-slate-600 text-slate-100 py-1.5 px-2.5 rounded-lg text-xs font-medium flex items-center justify-center space-x-1.5 border border-slate-600">
+              <i class="fa-solid fa-cube text-emerald-400"></i>
+              <span>GeoPackage</span>
+            </button>
+            <button onclick="downloadFormat('kml')" class="bg-slate-700 hover:bg-slate-600 text-slate-100 py-1.5 px-2.5 rounded-lg text-xs font-medium flex items-center justify-center space-x-1.5 border border-slate-600">
+              <i class="fa-solid fa-globe text-cyan-400"></i>
+              <span>Google KML</span>
+            </button>
+            <button onclick="downloadFormat('geojson')" class="bg-slate-700 hover:bg-slate-600 text-slate-100 py-1.5 px-2.5 rounded-lg text-xs font-medium flex items-center justify-center space-x-1.5 border border-slate-600">
+              <i class="fa-solid fa-code text-purple-400"></i>
+              <span>GeoJSON</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+    </aside>
+
+    <!-- Right Main Area: Interactive GIS Viewer -->
+    <main class="flex-1 flex flex-col bg-slate-950 overflow-hidden relative">
+      
+      <!-- View Controls & Tabs -->
+      <div class="bg-slate-900 border-b border-slate-800 px-4 py-2 flex items-center justify-between text-xs">
+        <div class="flex items-center space-x-2">
+          <button id="tabMap" onclick="switchTab('map')" class="px-3 py-1.5 rounded-md font-semibold bg-emerald-600 text-white flex items-center gap-1.5 shadow">
+            <i class="fa-solid fa-layer-group"></i> Visualizador Interativo
+          </button>
+          <button id="tabTable" onclick="switchTab('table')" class="px-3 py-1.5 rounded-md font-medium text-slate-300 hover:bg-slate-800 flex items-center gap-1.5">
+            <i class="fa-solid fa-table-list"></i> Tabela de Lotes (<span id="tabCount">0</span>)
+          </button>
+          <button id="tabPreview" onclick="switchTab('preview')" class="px-3 py-1.5 rounded-md font-medium text-slate-300 hover:bg-slate-800 flex items-center gap-1.5">
+            <i class="fa-solid fa-image"></i> Pré-visualização OpenCV
+          </button>
+        </div>
+
+        <!-- Layer visibility toggles -->
+        <div id="layerToggles" class="flex items-center space-x-4 text-slate-300">
+          <label class="flex items-center space-x-1.5 cursor-pointer">
+            <input type="checkbox" id="chkRaster" checked onchange="toggleRasterLayer()" class="accent-emerald-500">
+            <span>Prancha Original</span>
+          </label>
+          <label class="flex items-center space-x-1.5 cursor-pointer">
+            <input type="checkbox" id="chkQuadra" checked onchange="toggleQuadraLayer()" class="accent-sky-500">
+            <span>Perímetro Quadra</span>
+          </label>
+          <label class="flex items-center space-x-1.5 cursor-pointer">
+            <input type="checkbox" id="chkLots" checked onchange="toggleLotsLayer()" class="accent-emerald-500">
+            <span>Divisas dos Lotes</span>
+          </label>
+          <div class="flex items-center space-x-1">
+            <span class="text-[11px] text-slate-400">Opacidade:</span>
+            <input type="range" id="opacitySlider" min="0" max="100" value="70" oninput="changeOpacity(this.value)" class="w-16 accent-emerald-500">
+          </div>
+        </div>
+      </div>
+
+      <!-- Container: Interactive Map -->
+      <div id="mapView" class="flex-1 relative">
+        <div id="map"></div>
+        <div id="emptyMapPrompt" class="absolute inset-0 flex flex-col items-center justify-center bg-slate-950/90 z-[500] text-center p-6">
+          <div class="w-16 h-16 rounded-2xl bg-slate-800/80 flex items-center justify-center text-slate-500 mb-4 border border-slate-700/50">
+            <i class="fa-solid fa-map text-3xl"></i>
+          </div>
+          <h3 class="text-base font-semibold text-slate-200 mb-1">Nenhuma planta carregada</h3>
+          <p class="text-xs text-slate-400 max-w-md">Faça upload de uma planta (.tif, .jpg, .png, .pdf) na barra lateral ou clique em um dos exemplos disponíveis para visualizar e extrair os vetores.</p>
+        </div>
+      </div>
+
+      <!-- Container: Lots Table -->
+      <div id="tableView" class="flex-1 p-6 overflow-y-auto hidden">
+        <div class="max-w-4xl mx-auto bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-xl">
+          <div class="px-6 py-4 border-b border-slate-800 flex justify-between items-center">
+            <h3 class="text-sm font-semibold text-slate-200 flex items-center gap-2">
+              <i class="fa-solid fa-list-ol text-emerald-400"></i>
+              Relação de Lotes Fiscais Extraídos
+            </h3>
+            <span id="tableSummary" class="text-xs text-slate-400">Total: 0 lotes</span>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs text-slate-300">
+              <thead class="bg-slate-800/80 text-slate-400 font-semibold border-b border-slate-700/50">
+                <tr>
+                  <th class="px-6 py-3">Lote #</th>
+                  <th class="px-6 py-3">Área Calculada (m²)</th>
+                  <th class="px-6 py-3">Perímetro (m)</th>
+                  <th class="px-6 py-3">Ações</th>
+                </tr>
+              </thead>
+              <tbody id="lotsTableBody" class="divide-y divide-slate-800/60 font-mono">
+                <!-- Rows injected dynamically -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Container: OpenCV Image Preview -->
+      <div id="previewView" class="flex-1 p-6 overflow-auto hidden flex items-center justify-center bg-slate-950">
+        <img id="opencvPreviewImg" class="max-w-full max-h-full rounded-lg shadow-2xl border border-slate-800 object-contain" alt="OpenCV Vector Preview">
+      </div>
+
+    </main>
+  </div>
+
+  <!-- Loading Overlay Modal -->
+  <div id="loadingModal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[1000] flex items-center justify-center hidden">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-sm w-full mx-4 shadow-2xl text-center space-y-4">
+      <div class="w-14 h-14 rounded-full border-4 border-emerald-500/20 border-t-emerald-500 animate-spin mx-auto"></div>
+      <div>
+        <h4 id="loadingTitle" class="text-sm font-bold text-white mb-1">Processando Planta...</h4>
+        <p id="loadingMsg" class="text-xs text-slate-400">Detectando contorno da quadra e divisas dos lotes...</p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let currentTaskId = null;
+    let map = null;
+    let rasterOverlay = null;
+    let quadraLayer = null;
+    let lotsLayer = null;
+    let labelMarkers = [];
+    let currentImageDimensions = [1000, 1000];
+
+    // Inicializar mapa Leaflet L.CRS.Simple
+    function initMap() {
+      if (map) return;
+      map = L.map('map', {
+        crs: L.CRS.Simple,
+        minZoom: -3,
+        maxZoom: 3,
+        zoomSnap: 0.25,
+        attributionControl: false
+      });
+      map.setView([500, 500], -1);
+    }
+
+    // Carregar exemplos da pasta
+    async function loadExamples() {
+      try {
+        const res = await fetch('/api/examples');
+        const files = await res.json();
+        const container = document.getElementById('examplesList');
+        container.innerHTML = '';
+        if (files.length === 0) {
+          container.innerHTML = '<span class="text-xs text-slate-500">Nenhum arquivo na pasta.</span>';
+          return;
+        }
+        files.forEach(f => {
+          const btn = document.createElement('button');
+          btn.className = 'text-[11px] bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white px-2.5 py-1 rounded border border-slate-700/60 transition truncate max-w-[150px]';
+          btn.title = `${f.filename} (${f.size_kb} KB)`;
+          btn.innerText = f.filename;
+          btn.onclick = () => selectExample(f.filename);
+          container.appendChild(btn);
+        });
+      } catch (err) {
+        console.error('Erro ao listar exemplos:', err);
+      }
+    }
+
+    // Selecionar arquivo de exemplo
+    async function selectExample(filename) {
+      showLoading('Carregando Arquivo', `Carregando ${filename}...`);
+      try {
+        const res = await fetch('/api/load_example', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({filename: filename})
+        });
+        const data = await res.json();
+        hideLoading();
+        if (data.success) {
+          currentTaskId = data.task_id;
+          document.getElementById('currentFileName').innerText = data.filename;
+          document.getElementById('currentFileName').classList.remove('hidden');
+          document.getElementById('btnProcess').disabled = false;
+          
+          // Pre-configurar valores se for um dos conhecidos
+          if (filename.includes('44463-33-38')) {
+            document.getElementById('scaleSelect').value = '750';
+            document.getElementById('quadraCodeInput').value = 'QD-38';
+            document.getElementById('bairroInput').value = 'RESIDENCIAL JASMIM';
+          } else if (filename.includes('44454-42-39')) {
+            document.getElementById('scaleSelect').value = '750';
+            document.getElementById('quadraCodeInput').value = 'QD-39';
+            document.getElementById('bairroInput').value = 'VL. VERMONT';
+          } else if (filename.includes('44443-24-63')) {
+            document.getElementById('scaleSelect').value = '2500';
+            document.getElementById('quadraCodeInput').value = 'QD-63';
+            document.getElementById('bairroInput').value = 'JD. PINHEIRINHO';
+          }
+          // Processar automaticamente ao clicar no exemplo!
+          processFile();
+        } else {
+          alert('Erro ao carregar exemplo: ' + data.error);
+        }
+      } catch (err) {
+        hideLoading();
+        alert('Falha na requisição: ' + err);
+      }
+    }
+
+    // Upload de arquivo
+    const dropzone = document.getElementById('dropzone');
+    const fileInput = document.getElementById('fileInput');
+
+    dropzone.onclick = () => fileInput.click();
+    dropzone.ondragover = (e) => { e.preventDefault(); dropzone.classList.add('border-emerald-500'); };
+    dropzone.ondragleave = () => { dropzone.classList.remove('border-emerald-500'); };
+    dropzone.ondrop = (e) => {
+      e.preventDefault();
+      dropzone.classList.remove('border-emerald-500');
+      if (e.dataTransfer.files.length > 0) {
+        handleFileUpload(e.dataTransfer.files[0]);
+      }
+    };
+    fileInput.onchange = () => {
+      if (fileInput.files.length > 0) {
+        handleFileUpload(fileInput.files[0]);
+      }
+    };
+
+    async function handleFileUpload(file) {
+      showLoading('Enviando Arquivo', `Enviando ${file.name}...`);
+      const formData = new FormData();
+      formData.append('file', file);
+
+      try {
+        const res = await fetch('/api/upload', {
+          method: 'POST',
+          body: formData
+        });
+        const data = await res.json();
+        hideLoading();
+        if (data.success) {
+          currentTaskId = data.task_id;
+          document.getElementById('currentFileName').innerText = data.filename;
+          document.getElementById('currentFileName').classList.remove('hidden');
+          document.getElementById('btnProcess').disabled = false;
+          // Sugerir código
+          const base = data.filename.split('.')[0];
+          document.getElementById('quadraCodeInput').value = 'QD-' + base.slice(-2);
+          processFile();
+        } else {
+          alert('Erro no envio: ' + data.error);
+        }
+      } catch (err) {
+        hideLoading();
+        alert('Erro ao enviar arquivo: ' + err);
+      }
+    }
+
+    // Alternar escala personalizada
+    function toggleCustomScale(val) {
+      const input = document.getElementById('customScaleInput');
+      if (val === 'custom') {
+        input.classList.remove('hidden');
+        input.focus();
+      } else {
+        input.classList.add('hidden');
+      }
+    }
+
+    // Processar e vetorizar
+    async function processFile() {
+      if (!currentTaskId) return;
+      showLoading('Vetorizando Planta', 'Isolando contorno da quadra e poligonizando divisas...');
+
+      const scaleSelect = document.getElementById('scaleSelect').value;
+      const customScale = document.getElementById('customScaleInput').value;
+      const finalScale = (scaleSelect === 'custom' && customScale) ? customScale : scaleSelect;
+
+      const payload = {
+        task_id: currentTaskId,
+        scale: finalScale,
+        dpi: document.getElementById('dpiInput').value,
+        quadra_code: document.getElementById('quadraCodeInput').value,
+        bairro: document.getElementById('bairroInput').value,
+        sensitivity: document.getElementById('sensSlider').value,
+        min_lot_area: document.getElementById('minAreaInput').value,
+        sort_mode: document.getElementById('sortModeSelect').value,
+        ref_cota: document.getElementById('refCotaInput').value
+      };
+
+      try {
+        const res = await fetch('/api/process', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        hideLoading();
+
+        if (data.success) {
+          renderResults(data);
+        } else {
+          alert('Erro no processamento: ' + data.error);
+        }
+      } catch (err) {
+        hideLoading();
+        alert('Falha na comunicação com o servidor: ' + err);
+      }
+    }
+
+    // Renderizar resultados no mapa e na tabela
+    function renderResults(data) {
+      initMap();
+      document.getElementById('emptyMapPrompt').classList.add('hidden');
+      document.getElementById('statsCard').classList.remove('hidden');
+
+      // Atualizar métricas
+      document.getElementById('statAreaQuadra').innerText = Number(data.stats.quadra_area_m2).toLocaleString('pt-BR') + ' m²';
+      document.getElementById('statTotalLots').innerText = data.stats.total_lots;
+      document.getElementById('statPerimQuadra').innerText = Number(data.stats.quadra_perim_m).toLocaleString('pt-BR') + ' m';
+      document.getElementById('statRes').innerText = data.stats.resolution_m_px + ' m/px';
+      document.getElementById('tabCount').innerText = data.stats.total_lots;
+
+      // Dimensões da imagem original
+      const [w, h] = data.stats.dimensions_px;
+      currentImageDimensions = [w, h];
+      const bounds = [[0, 0], [h, w]];
+
+      // Limpar camadas anteriores
+      if (rasterOverlay) map.removeLayer(rasterOverlay);
+      if (quadraLayer) map.removeLayer(quadraLayer);
+      if (lotsLayer) map.removeLayer(lotsLayer);
+      labelMarkers.forEach(m => map.removeLayer(m));
+      labelMarkers = [];
+
+      // 1. Overlay da prancha original
+      rasterOverlay = L.imageOverlay(data.orig_url, bounds).addTo(map);
+
+      // 2. Camadas vetoriais
+      const quadraFeatures = data.geojson_pixel.features.filter(f => f.properties.TIPO === 'QUADRA');
+      const lotsFeatures = data.geojson_pixel.features.filter(f => f.properties.TIPO === 'LOTE');
+
+      // Quadra Layer
+      quadraLayer = L.geoJSON({type: 'FeatureCollection', features: quadraFeatures}, {
+        coordsToLatLng: function(coords) {
+          // Leaflet L.CRS.Simple [lat, lng] = [y, x]
+          return [coords[1], coords[0]];
+        },
+        style: {
+          color: '#0284c7',
+          weight: 4,
+          fillOpacity: 0
+        }
+      }).addTo(map);
+
+      // Lotes Layer
+      lotsLayer = L.geoJSON({type: 'FeatureCollection', features: lotsFeatures}, {
+        coordsToLatLng: function(coords) {
+          return [coords[1], coords[0]];
+        },
+        style: function(feature) {
+          return {
+            color: '#16a34a',
+            weight: 2,
+            fillColor: '#22c55e',
+            fillOpacity: 0.25
+          };
+        },
+        onEachFeature: function(feature, layer) {
+          const props = feature.properties;
+          layer.bindTooltip(`<b>Lote ${props.ID}</b><br>Área: ${Number(props.AREA_M2).toLocaleString('pt-BR')} m²<br>Perímetro: ${Number(props.PERIM_M).toLocaleString('pt-BR')} m`, {
+            sticky: true,
+            className: 'lot-tooltip'
+          });
+
+          layer.on('mouseover', function() {
+            this.setStyle({weight: 3, fillColor: '#eab308', fillOpacity: 0.5});
+          });
+          layer.on('mouseout', function() {
+            lotsLayer.resetStyle(this);
+          });
+
+          // Rótulo numérico no centro do lote
+          const center = layer.getBounds().getCenter();
+          const marker = L.marker(center, {
+            lotId: props.ID,
+            icon: L.divIcon({
+              className: 'lot-label',
+              html: props.ID,
+              iconSize: [24, 18],
+              iconAnchor: [12, 9]
+            })
+          });
+          labelMarkers.push(marker);
+          marker.addTo(map);
+        }
+      }).addTo(map);
+
+      // Ajustar visualização do mapa para a quadra
+      map.fitBounds(quadraLayer.getBounds(), {padding: [40, 40]});
+
+      // Atualizar tabela de lotes com edição de numeração
+      const tbody = document.getElementById('lotsTableBody');
+      tbody.innerHTML = '';
+      data.lots.forEach(lot => {
+        const tr = document.createElement('tr');
+        tr.className = 'hover:bg-slate-800/50 transition';
+        tr.innerHTML = `
+          <td class="px-6 py-2.5 font-bold text-emerald-400 flex items-center gap-1.5">
+            <span class="text-slate-400 text-xs font-normal">Lote</span>
+            <input type="text" value="${lot.num_lote}" onchange="updateLotId('${lot.num_lote}', this.value)" class="w-14 bg-slate-900 border border-slate-700 focus:border-emerald-500 rounded px-1.5 py-0.5 text-emerald-300 font-bold text-center text-xs">
+          </td>
+          <td class="px-6 py-2.5 font-mono">${Number(lot.area_m2).toLocaleString('pt-BR')} m²</td>
+          <td class="px-6 py-2.5 font-mono text-slate-400">${Number(lot.perim_m).toLocaleString('pt-BR')} m</td>
+          <td class="px-6 py-2.5">
+            <button onclick="highlightLot('${lot.num_lote}')" class="text-xs text-sky-400 hover:text-sky-300">
+              <i class="fa-solid fa-magnifying-glass mr-1"></i>Ver
+            </button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+      document.getElementById('tableSummary').innerText = `Total: ${data.lots.length} lotes encontrados`;
+
+      // Atualizar imagem OpenCV
+      document.getElementById('opencvPreviewImg').src = data.prev_url;
+    }
+
+    // Atualizar ID do lote interativamente
+    function updateLotId(oldId, newId) {
+      if (!newId || oldId === newId) return;
+      if (lotsLayer) {
+        lotsLayer.eachLayer(layer => {
+          if (layer.feature && String(layer.feature.properties.ID) === String(oldId)) {
+            layer.feature.properties.ID = newId;
+            const props = layer.feature.properties;
+            layer.setTooltipContent(`<b>Lote ${props.ID}</b><br>Área: ${Number(props.AREA_M2).toLocaleString('pt-BR')} m²<br>Perímetro: ${Number(props.PERIM_M).toLocaleString('pt-BR')} m`);
+          }
+        });
+      }
+      labelMarkers.forEach(m => {
+        if (m.options && String(m.options.lotId) === String(oldId)) {
+          m.options.lotId = newId;
+          m.setIcon(L.divIcon({
+            className: 'lot-label',
+            html: newId,
+            iconSize: [24, 18],
+            iconAnchor: [12, 9]
+          }));
+        }
+      });
+    }
+
+    // Destaque de lote pelo botão da tabela
+    function highlightLot(lotId) {
+      switchTab('map');
+      if (!lotsLayer) return;
+      lotsLayer.eachLayer(layer => {
+        if (layer.feature && layer.feature.properties.ID === lotId) {
+          map.fitBounds(layer.getBounds(), {padding: [100, 100]});
+          layer.setStyle({weight: 4, fillColor: '#f97316', fillOpacity: 0.6});
+          setTimeout(() => lotsLayer.resetStyle(layer), 2500);
+        }
+      });
+    }
+
+    // Alternar abas
+    function switchTab(tab) {
+      document.getElementById('mapView').classList.add('hidden');
+      document.getElementById('tableView').classList.add('hidden');
+      document.getElementById('previewView').classList.add('hidden');
+
+      document.getElementById('tabMap').className = 'px-3 py-1.5 rounded-md font-medium text-slate-300 hover:bg-slate-800 flex items-center gap-1.5';
+      document.getElementById('tabTable').className = 'px-3 py-1.5 rounded-md font-medium text-slate-300 hover:bg-slate-800 flex items-center gap-1.5';
+      document.getElementById('tabPreview').className = 'px-3 py-1.5 rounded-md font-medium text-slate-300 hover:bg-slate-800 flex items-center gap-1.5';
+
+      if (tab === 'map') {
+        document.getElementById('mapView').classList.remove('hidden');
+        document.getElementById('tabMap').className = 'px-3 py-1.5 rounded-md font-semibold bg-emerald-600 text-white flex items-center gap-1.5 shadow';
+        if (map) map.invalidateSize();
+      } else if (tab === 'table') {
+        document.getElementById('tableView').classList.remove('hidden');
+        document.getElementById('tabTable').className = 'px-3 py-1.5 rounded-md font-semibold bg-emerald-600 text-white flex items-center gap-1.5 shadow';
+      } else if (tab === 'preview') {
+        document.getElementById('previewView').classList.remove('hidden');
+        document.getElementById('tabPreview').className = 'px-3 py-1.5 rounded-md font-semibold bg-emerald-600 text-white flex items-center gap-1.5 shadow';
+      }
+    }
+
+    // Controles de visibilidade de camadas
+    function toggleRasterLayer() {
+      if (!rasterOverlay) return;
+      if (document.getElementById('chkRaster').checked) {
+        map.addLayer(rasterOverlay);
+      } else {
+        map.removeLayer(rasterOverlay);
+      }
+    }
+    function toggleQuadraLayer() {
+      if (!quadraLayer) return;
+      if (document.getElementById('chkQuadra').checked) {
+        map.addLayer(quadraLayer);
+      } else {
+        map.removeLayer(quadraLayer);
+      }
+    }
+    function toggleLotsLayer() {
+      if (!lotsLayer) return;
+      if (document.getElementById('chkLots').checked) {
+        map.addLayer(lotsLayer);
+        labelMarkers.forEach(m => map.addLayer(m));
+      } else {
+        map.removeLayer(lotsLayer);
+        labelMarkers.forEach(m => map.removeLayer(m));
+      }
+    }
+    function changeOpacity(val) {
+      if (!lotsLayer) return;
+      const op = val / 100.0;
+      lotsLayer.setStyle({fillOpacity: op * 0.4});
+    }
+
+    // Download de formatos
+    function downloadFormat(fmt) {
+      if (!currentTaskId) return;
+      window.location.href = `/api/download/${fmt}/${currentTaskId}`;
+    }
+
+    // Modal de carregamento
+    function showLoading(title, msg) {
+      document.getElementById('loadingTitle').innerText = title;
+      document.getElementById('loadingMsg').innerText = msg;
+      document.getElementById('loadingModal').classList.remove('hidden');
+    }
+    function hideLoading() {
+      document.getElementById('loadingModal').classList.add('hidden');
+    }
+
+    // Slider listener
+    document.getElementById('sensSlider').oninput = function() {
+      document.getElementById('sensValue').innerText = this.value;
+    };
+    document.getElementById('btnProcess').onclick = processFile;
+
+    // Inicialização ao carregar página
+    window.onload = () => {
+      initMap();
+      loadExamples();
+    };
+  </script>
+</body>
+</html>
