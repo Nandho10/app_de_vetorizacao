@@ -212,25 +212,13 @@
             <span class="text-[10px] text-slate-400 uppercase tracking-wider block">Lotes Detectados</span>
             <span id="statTotalLots" class="text-base font-bold text-emerald-400">-</span>
           </div>
-          <div class="bg-slate-900/80 p-2.5 rounded-lg border border-amber-500/30">
-            <span class="text-[10px] text-amber-300 uppercase tracking-wider block flex items-center justify-center gap-1">
-              <span class="w-2 h-2 rounded-full bg-amber-400"></span> Edif. Existentes
-            </span>
-            <span id="statEdifExistentes" class="text-sm font-bold text-amber-300">-</span>
-          </div>
-          <div class="bg-slate-900/80 p-2.5 rounded-lg border border-rose-500/30">
-            <span class="text-[10px] text-rose-300 uppercase tracking-wider block flex items-center justify-center gap-1">
-              <span class="w-2 h-2 rounded-full bg-rose-400"></span> Demolidas (Área Livre)
-            </span>
-            <span id="statEdifDemolidas" class="text-sm font-bold text-rose-300">-</span>
-          </div>
-          <div class="bg-slate-900/80 p-2.5 rounded-lg border border-slate-700/40">
-            <span class="text-[10px] text-slate-400 uppercase tracking-wider block">Área Construída</span>
-            <span id="statAreaConstruida" class="text-xs font-semibold text-amber-200">-</span>
-          </div>
           <div class="bg-slate-900/80 p-2.5 rounded-lg border border-slate-700/40">
             <span class="text-[10px] text-slate-400 uppercase tracking-wider block">Perímetro Quadra</span>
             <span id="statPerimQuadra" class="text-xs font-semibold text-slate-200">-</span>
+          </div>
+          <div class="bg-slate-900/80 p-2.5 rounded-lg border border-slate-700/40">
+            <span class="text-[10px] text-slate-400 uppercase tracking-wider block">Área Média / Lote</span>
+            <span id="statAreaMediaLote" class="text-xs font-semibold text-emerald-300">-</span>
           </div>
         </div>
 
@@ -273,9 +261,6 @@
           <button id="tabTable" onclick="switchTab('table')" class="px-3 py-1.5 rounded-md font-medium text-slate-300 hover:bg-slate-800 flex items-center gap-1.5">
             <i class="fa-solid fa-table-list"></i> Lotes (<span id="tabCount">0</span>)
           </button>
-          <button id="tabEdif" onclick="switchTab('edif')" class="px-3 py-1.5 rounded-md font-medium text-slate-300 hover:bg-slate-800 flex items-center gap-1.5">
-            <i class="fa-solid fa-building text-amber-400"></i> Edificações (<span id="tabEdifCount">0</span>)
-          </button>
           <button id="tabPreview" onclick="switchTab('preview')" class="px-3 py-1.5 rounded-md font-medium text-slate-300 hover:bg-slate-800 flex items-center gap-1.5">
             <i class="fa-solid fa-image"></i> Pré-visualização OpenCV
           </button>
@@ -294,14 +279,6 @@
           <label class="flex items-center space-x-1 cursor-pointer">
             <input type="checkbox" id="chkLots" checked onchange="toggleLotsLayer()" class="accent-emerald-500">
             <span>Lotes</span>
-          </label>
-          <label class="flex items-center space-x-1 cursor-pointer">
-            <input type="checkbox" id="chkEdifExistente" checked onchange="toggleEdifExistenteLayer()" class="accent-amber-500">
-            <span class="text-amber-300">Edif. Existente</span>
-          </label>
-          <label class="flex items-center space-x-1 cursor-pointer">
-            <input type="checkbox" id="chkEdifDemolida" checked onchange="toggleEdifDemolidaLayer()" class="accent-rose-500">
-            <span class="text-rose-300">Demolida (Livre)</span>
           </label>
           <div class="flex items-center space-x-1 pl-1 border-l border-slate-700/60">
             <span class="text-[10px] text-slate-400">Opac:</span>
@@ -350,36 +327,6 @@
         </div>
       </div>
 
-      <!-- Container: Edificações Table -->
-      <div id="edifTableView" class="flex-1 p-6 overflow-y-auto hidden">
-        <div class="max-w-5xl mx-auto bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-xl">
-          <div class="px-6 py-4 border-b border-slate-800 flex justify-between items-center">
-            <h3 class="text-sm font-semibold text-slate-200 flex items-center gap-2">
-              <i class="fa-solid fa-building text-amber-400"></i>
-              Relação de Edificações Identificadas (Existentes e Demolidas)
-            </h3>
-            <span id="edifTableSummary" class="text-xs text-slate-400">Total: 0 edificações</span>
-          </div>
-          <div class="overflow-x-auto">
-            <table class="w-full text-left text-xs text-slate-300">
-              <thead class="bg-slate-800/80 text-slate-400 font-semibold border-b border-slate-700/50">
-                <tr>
-                  <th class="px-6 py-3">Código</th>
-                  <th class="px-6 py-3">Tipo</th>
-                  <th class="px-6 py-3">Status Cadastral</th>
-                  <th class="px-6 py-3">Lote</th>
-                  <th class="px-6 py-3">Área (m²)</th>
-                  <th class="px-6 py-3">Perímetro (m)</th>
-                  <th class="px-6 py-3">Ações</th>
-                </tr>
-              </thead>
-              <tbody id="edifTableBody" class="divide-y divide-slate-800/60 font-mono">
-                <!-- Rows injected dynamically -->
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
 
       <!-- Container: OpenCV Image Preview -->
       <div id="previewView" class="flex-1 p-6 overflow-auto hidden flex items-center justify-center bg-slate-950">
@@ -406,8 +353,6 @@
     let rasterOverlay = null;
     let quadraLayer = null;
     let lotsLayer = null;
-    let edifExistenteLayer = null;
-    let edifDemolidaLayer = null;
     let labelMarkers = [];
     let currentImageDimensions = [1000, 1000];
 
@@ -597,11 +542,8 @@
       document.getElementById('statAreaQuadra').innerText = Number(data.stats.quadra_area_m2).toLocaleString('pt-BR') + ' m²';
       document.getElementById('statTotalLots').innerText = data.stats.total_lots;
       document.getElementById('statPerimQuadra').innerText = Number(data.stats.quadra_perim_m).toLocaleString('pt-BR') + ' m';
-      document.getElementById('statEdifExistentes').innerText = data.stats.edificacoes_existentes || 0;
-      document.getElementById('statEdifDemolidas').innerText = data.stats.edificacoes_demolidas || 0;
-      document.getElementById('statAreaConstruida').innerText = Number(data.stats.area_construida_m2 || 0).toLocaleString('pt-BR') + ' m²';
+      document.getElementById('statAreaMediaLote').innerText = Number(data.stats.area_media_lote_m2 || 0).toLocaleString('pt-BR') + ' m²';
       document.getElementById('tabCount').innerText = data.stats.total_lots;
-      document.getElementById('tabEdifCount').innerText = data.stats.total_edificacoes || 0;
 
       // Dimensões da imagem original
       const [w, h] = data.stats.dimensions_px;
@@ -612,8 +554,6 @@
       if (rasterOverlay) map.removeLayer(rasterOverlay);
       if (quadraLayer) map.removeLayer(quadraLayer);
       if (lotsLayer) map.removeLayer(lotsLayer);
-      if (edifExistenteLayer) map.removeLayer(edifExistenteLayer);
-      if (edifDemolidaLayer) map.removeLayer(edifDemolidaLayer);
       labelMarkers.forEach(m => map.removeLayer(m));
       labelMarkers = [];
 
@@ -623,8 +563,6 @@
       // 2. Separar feições vetoriais
       const quadraFeatures = data.geojson_pixel.features.filter(f => f.properties.TIPO === 'QUADRA');
       const lotsFeatures = data.geojson_pixel.features.filter(f => f.properties.TIPO === 'LOTE');
-      const edifExistenteFeatures = data.geojson_pixel.features.filter(f => f.properties.TIPO === 'EDIFICACAO' && f.properties.SUBTIPO === 'EXISTENTE');
-      const edifDemolidaFeatures = data.geojson_pixel.features.filter(f => f.properties.TIPO === 'EDIFICACAO' && f.properties.SUBTIPO === 'DEMOLIDA');
 
       // Quadra Layer
       quadraLayer = L.geoJSON({type: 'FeatureCollection', features: quadraFeatures}, {
@@ -676,49 +614,6 @@
         }
       }).addTo(map);
 
-      // Edificações Existentes Layer (Amarelo)
-      if (edifExistenteFeatures.length > 0) {
-        edifExistenteLayer = L.geoJSON({type: 'FeatureCollection', features: edifExistenteFeatures}, {
-          coordsToLatLng: function(coords) { return [coords[1], coords[0]]; },
-          style: {
-            color: '#ca8a04',
-            weight: 2,
-            fillColor: '#facc15',
-            fillOpacity: 0.65
-          },
-          onEachFeature: function(feature, layer) {
-            const props = feature.properties;
-            layer.bindTooltip(`<b>${props.ID} (Edificação Existente)</b><br>Lote: ${props.LOTE || '-'}<br>Área Construída: ${Number(props.AREA_M2).toLocaleString('pt-BR')} m²`, {
-              sticky: true
-            });
-            layer.on('mouseover', function() { this.setStyle({weight: 3, fillOpacity: 0.90}); });
-            layer.on('mouseout', function() { edifExistenteLayer.resetStyle(this); });
-          }
-        }).addTo(map);
-      }
-
-      // Edificações Demolidas Layer (Vermelho - Área Livre)
-      if (edifDemolidaFeatures.length > 0) {
-        edifDemolidaLayer = L.geoJSON({type: 'FeatureCollection', features: edifDemolidaFeatures}, {
-          coordsToLatLng: function(coords) { return [coords[1], coords[0]]; },
-          style: {
-            color: '#dc2626',
-            weight: 2,
-            dashArray: '4, 4',
-            fillColor: '#f87171',
-            fillOpacity: 0.50
-          },
-          onEachFeature: function(feature, layer) {
-            const props = feature.properties;
-            layer.bindTooltip(`<b>${props.ID} (Demolida - Área Livre)</b><br>Lote: ${props.LOTE || '-'}<br>Área Livre: ${Number(props.AREA_M2).toLocaleString('pt-BR')} m²`, {
-              sticky: true
-            });
-            layer.on('mouseover', function() { this.setStyle({weight: 3, fillOpacity: 0.80}); });
-            layer.on('mouseout', function() { edifDemolidaLayer.resetStyle(this); });
-          }
-        }).addTo(map);
-      }
-
       // Ajustar visualização do mapa para a quadra
       map.fitBounds(quadraLayer.getBounds(), {padding: [40, 40]});
 
@@ -744,43 +639,6 @@
         tbody.appendChild(tr);
       });
       document.getElementById('tableSummary').innerText = `Total: ${data.lots.length} lotes encontrados`;
-
-      // Atualizar tabela de edificações
-      const edifTbody = document.getElementById('edifTableBody');
-      edifTbody.innerHTML = '';
-      if (data.edificacoes && data.edificacoes.length > 0) {
-        data.edificacoes.forEach(edif => {
-          const isExistente = edif.tipo === 'EXISTENTE';
-          const badgeClass = isExistente 
-            ? 'bg-amber-500/20 text-amber-300 border-amber-500/30' 
-            : 'bg-rose-500/20 text-rose-300 border-rose-500/30';
-          const statusBadge = isExistente
-            ? '<span class="text-amber-400 font-semibold"><i class="fa-solid fa-house mr-1"></i>Área Construída</span>'
-            : '<span class="text-rose-400 font-semibold"><i class="fa-solid fa-ban mr-1"></i>Área Livre (Demolida)</span>';
-          
-          const tr = document.createElement('tr');
-          tr.className = 'hover:bg-slate-800/50 transition';
-          tr.innerHTML = `
-            <td class="px-6 py-2.5 font-bold text-white">${edif.id_edif}</td>
-            <td class="px-6 py-2.5">
-              <span class="text-[11px] px-2 py-0.5 rounded-full border ${badgeClass}">${edif.tipo}</span>
-            </td>
-            <td class="px-6 py-2.5 text-xs">${statusBadge}</td>
-            <td class="px-6 py-2.5 font-bold text-emerald-400">Lote ${edif.lote || '-'}</td>
-            <td class="px-6 py-2.5 font-mono">${Number(edif.area_m2).toLocaleString('pt-BR')} m²</td>
-            <td class="px-6 py-2.5 font-mono text-slate-400">${Number(edif.perim_m).toLocaleString('pt-BR')} m</td>
-            <td class="px-6 py-2.5">
-              <button onclick="highlightEdif('${edif.id_edif}')" class="text-xs text-amber-400 hover:text-amber-300">
-                <i class="fa-solid fa-magnifying-glass mr-1"></i>Ver
-              </button>
-            </td>
-          `;
-          edifTbody.appendChild(tr);
-        });
-        document.getElementById('edifTableSummary').innerText = `Total: ${data.edificacoes.length} edificações (${data.stats.edificacoes_existentes || 0} existentes, ${data.stats.edificacoes_demolidas || 0} demolidas)`;
-      } else {
-        document.getElementById('edifTableSummary').innerText = 'Nenhuma edificação detectada nesta planta';
-      }
 
       // Atualizar imagem OpenCV
       document.getElementById('opencvPreviewImg').src = data.prev_url;
@@ -824,37 +682,14 @@
       });
     }
 
-    // Destaque de edificação pelo botão da tabela
-    function highlightEdif(edifId) {
-      switchTab('map');
-      const checkLayer = (layerGroup) => {
-        if (!layerGroup) return false;
-        let found = false;
-        layerGroup.eachLayer(layer => {
-          if (layer.feature && layer.feature.properties.ID === edifId) {
-            map.fitBounds(layer.getBounds(), {padding: [120, 120]});
-            layer.setStyle({weight: 4, fillOpacity: 0.95});
-            setTimeout(() => layerGroup.resetStyle(layer), 2500);
-            found = true;
-          }
-        });
-        return found;
-      };
-      if (!checkLayer(edifExistenteLayer)) {
-        checkLayer(edifDemolidaLayer);
-      }
-    }
-
     // Alternar abas
     function switchTab(tab) {
       document.getElementById('mapView').classList.add('hidden');
       document.getElementById('tableView').classList.add('hidden');
-      document.getElementById('edifTableView').classList.add('hidden');
       document.getElementById('previewView').classList.add('hidden');
 
       document.getElementById('tabMap').className = 'px-3 py-1.5 rounded-md font-medium text-slate-300 hover:bg-slate-800 flex items-center gap-1.5';
       document.getElementById('tabTable').className = 'px-3 py-1.5 rounded-md font-medium text-slate-300 hover:bg-slate-800 flex items-center gap-1.5';
-      document.getElementById('tabEdif').className = 'px-3 py-1.5 rounded-md font-medium text-slate-300 hover:bg-slate-800 flex items-center gap-1.5';
       document.getElementById('tabPreview').className = 'px-3 py-1.5 rounded-md font-medium text-slate-300 hover:bg-slate-800 flex items-center gap-1.5';
 
       if (tab === 'map') {
@@ -864,9 +699,6 @@
       } else if (tab === 'table') {
         document.getElementById('tableView').classList.remove('hidden');
         document.getElementById('tabTable').className = 'px-3 py-1.5 rounded-md font-semibold bg-emerald-600 text-white flex items-center gap-1.5 shadow';
-      } else if (tab === 'edif') {
-        document.getElementById('edifTableView').classList.remove('hidden');
-        document.getElementById('tabEdif').className = 'px-3 py-1.5 rounded-md font-semibold bg-emerald-600 text-white flex items-center gap-1.5 shadow';
       } else if (tab === 'preview') {
         document.getElementById('previewView').classList.remove('hidden');
         document.getElementById('tabPreview').className = 'px-3 py-1.5 rounded-md font-semibold bg-emerald-600 text-white flex items-center gap-1.5 shadow';
@@ -898,22 +730,6 @@
       } else {
         map.removeLayer(lotsLayer);
         labelMarkers.forEach(m => map.removeLayer(m));
-      }
-    }
-    function toggleEdifExistenteLayer() {
-      if (!edifExistenteLayer) return;
-      if (document.getElementById('chkEdifExistente').checked) {
-        map.addLayer(edifExistenteLayer);
-      } else {
-        map.removeLayer(edifExistenteLayer);
-      }
-    }
-    function toggleEdifDemolidaLayer() {
-      if (!edifDemolidaLayer) return;
-      if (document.getElementById('chkEdifDemolida').checked) {
-        map.addLayer(edifDemolidaLayer);
-      } else {
-        map.removeLayer(edifDemolidaLayer);
       }
     }
     function changeOpacity(val) {

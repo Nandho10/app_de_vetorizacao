@@ -137,7 +137,7 @@ def process():
             epsg=epsg
         )
 
-        gdf_quadra, gdf_lots, gdf_edificacoes, vis_img, orig_img, stats, geojson_pixel = processor.process(
+        gdf_quadra, gdf_lots, vis_img, orig_img, stats, geojson_pixel = processor.process(
             file_path=file_path,
             quadra_code=quadra_code,
             bairro=bairro,
@@ -157,15 +157,14 @@ def process():
         cv2.imwrite(orig_path, orig_img, [cv2.IMWRITE_JPEG_QUALITY, 90])
         cv2.imwrite(prev_path, vis_img, [cv2.IMWRITE_JPEG_QUALITY, 90])
 
-        # Exportar todos os formatos vetoriais
+        # Exportar todos os formatos vetoriais (quadra e lotes)
         task_out_dir = os.path.join(OUTPUT_DIR, task_id)
         exported_files = VectorExporter.export_all(
             gdf_quadra=gdf_quadra,
             gdf_lots=gdf_lots,
             output_dir=task_out_dir,
             base_name=f"{quadra_code}_vetorizado",
-            crs_epsg=epsg,
-            gdf_edificacoes=gdf_edificacoes
+            crs_epsg=epsg
         )
 
         # Preparar dados tabulares dos lotes
@@ -174,19 +173,6 @@ def process():
             for _, row in gdf_lots.iterrows():
                 lots_table.append({
                     "num_lote": row.get("NUM_LOTE", ""),
-                    "area_m2": row.get("AREA_M2", 0),
-                    "perim_m": row.get("PERIM_M", 0)
-                })
-
-        # Preparar dados tabulares das edificações
-        edificacoes_table = []
-        if not gdf_edificacoes.empty:
-            for _, row in gdf_edificacoes.iterrows():
-                edificacoes_table.append({
-                    "id_edif": row.get("ID_EDIF", ""),
-                    "tipo": row.get("TIPO", ""),
-                    "status": row.get("STATUS", ""),
-                    "lote": row.get("LOTE", ""),
                     "area_m2": row.get("AREA_M2", 0),
                     "perim_m": row.get("PERIM_M", 0)
                 })
@@ -203,7 +189,6 @@ def process():
             "stats": stats,
             "geojson_pixel": geojson_pixel,
             "lots": lots_table,
-            "edificacoes": edificacoes_table,
             "orig_url": f"/cache/{task_id}/original.jpg",
             "prev_url": f"/cache/{task_id}/preview.jpg"
         })
