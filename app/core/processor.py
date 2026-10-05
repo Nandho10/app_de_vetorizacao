@@ -4,7 +4,7 @@ import numpy as np
 import tempfile
 import zipfile
 from PIL import Image
-from shapely.geometry import Polygon, MultiPolygon, mapping
+from shapely.geometry import Polygon, MultiPolygon, Point
 from shapely.ops import polygonize, unary_union
 import geopandas as gpd
 import scipy.ndimage as ndi
@@ -18,6 +18,8 @@ except ImportError:
 class QuadraProcessor:
     """
     Engine para leitura, extração de contornos e vetorização de plantas de quadra fiscais.
+    Identifica o perímetro da quadra, segmenta lotes com topologia zero gap,
+    detecta edificações existentes (amarelas) e edificações demolidas/áreas livres (vermelhas).
     """
 
     def __init__(self, scale_denom=750, dpi=300, simplify_tol=0.002, min_lot_area_m2=10.0, epsg=31983):
@@ -37,7 +39,6 @@ class QuadraProcessor:
                 raise RuntimeError("Biblioteca pypdfium2 não instalada para suporte a PDF.")
             pdf = pdfium.PdfDocument(file_path)
             page = pdf[0]
-            # 300 DPI = scale 300 / 72 = 4.166666
             scale = 300 / 72.0
             pil_image = page.render(scale=scale).to_pil()
             img = cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGB2BGR)
@@ -61,7 +62,11 @@ class QuadraProcessor:
         return gray, bin_inv
 
     def find_quadra_boundary(self, bin_inv, crop_bbox=None):
-        """Localiza o contorno principal da quadra, removendo esporos externos e setas de indicação."""
+        """
+        Localiza o contorno principal da quadra, fechando pequenas descontinuidades de texto
+        (como círculos de vértice ou cotas nos cantos de lotes como Lote 34) e eliminando
+        esporos/setas externos (como ponteiro 'P.R.').
+        """
         h_img, w_img = bin_inv.shape
         img_area = h_img * w_img
 
@@ -72,7 +77,10 @@ class QuadraProcessor:
             bin_inv_crop = cv2.bitwise_and(bin_inv, mask)
             contours, _ = cv2.findContours(bin_inv_crop, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
         else:
-            contours, _ = cv2.findContours(bin_inv, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+            # Fechamento morfológico para conectar quebras tênues no perímetro externo
+            kernel_close = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+            bin_inv_closed = cv2.morphologyEx(bin_inv, cv2.MORPH_CLOSE, kernel_close)
+            contours, _ = cv2.findContours(bin_inv_closed, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
 
         candidates = []
         for cnt in contours:
@@ -91,10 +99,10 @@ class QuadraProcessor:
         candidates.sort(key=lambda x: x[0], reverse=True)
         best_cnt = candidates[0][1]
 
-        # Remoção morfológica de setas/esporos finos externos (ex: ponteiro "P.R.")
+        # Remoção morfológica de setas/esporos finos externos
         quadra_mask = np.zeros((h_img, w_img), dtype=np.uint8)
         cv2.drawContours(quadra_mask, [best_cnt], -1, 255, thickness=cv2.FILLED)
-        kernel_quadra = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
+        kernel_quadra = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
         quadra_mask = cv2.morphologyEx(quadra_mask, cv2.MORPH_OPEN, kernel_quadra)
         quadra_mask = cv2.morphologyEx(quadra_mask, cv2.MORPH_CLOSE, kernel_quadra)
 
@@ -106,8 +114,61 @@ class QuadraProcessor:
         approx = cv2.approxPolyDP(best_cnt, 0.002 * arc, True)
         return approx
 
-    def extract_lots(self, bin_inv, quadra_cnt, gray_img=None, line_sensitivity=50, sort_mode="cadastral_ring"):
-        """Segmenta os lotes no interior do perímetro da quadra eliminando espaços (zero gap) e mordidas de texto."""
+    def detect_buildings(self, img, quadra_cnt):
+        """
+        Detecta edificações existentes (amarelas) e edificações demolidas/áreas livres (vermelhas/rosas)
+        localizadas estritamente no interior da quadra.
+        """
+        h_img, w_img = img.shape[:2]
+        quadra_mask = np.zeros((h_img, w_img), dtype=np.uint8)
+        cv2.drawContours(quadra_mask, [quadra_cnt], -1, 255, thickness=cv2.FILLED)
+
+        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        
+        # Amarelo: saturação alta (>55) e matiz em [18, 55]
+        mask_yellow = cv2.inRange(hsv, (18, 55, 75), (55, 255, 255))
+        
+        # Vermelho/Rosa: matiz em [0, 18] ou [160, 180], saturação > 40
+        mask_red1 = cv2.inRange(hsv, (0, 40, 75), (18, 255, 255))
+        mask_red2 = cv2.inRange(hsv, (160, 40, 75), (180, 255, 255))
+        mask_red = cv2.bitwise_or(mask_red1, mask_red2)
+
+        # Restringir à área interna da quadra
+        mask_yellow = cv2.bitwise_and(mask_yellow, quadra_mask)
+        mask_red = cv2.bitwise_and(mask_red, quadra_mask)
+
+        k = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+        mask_yellow = cv2.morphologyEx(mask_yellow, cv2.MORPH_CLOSE, k)
+        mask_yellow = cv2.morphologyEx(mask_yellow, cv2.MORPH_OPEN, k)
+        mask_yellow = ndi.binary_fill_holes(mask_yellow).astype(np.uint8) * 255
+
+        mask_red = cv2.morphologyEx(mask_red, cv2.MORPH_CLOSE, k)
+        mask_red = cv2.morphologyEx(mask_red, cv2.MORPH_OPEN, k)
+        mask_red = ndi.binary_fill_holes(mask_red).astype(np.uint8) * 255
+
+        yellow_cnts = []
+        cnts_y, _ = cv2.findContours(mask_yellow, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        for c in cnts_y:
+            if cv2.contourArea(c) > 500:
+                arc = cv2.arcLength(c, True)
+                approx = cv2.approxPolyDP(c, max(1.0, 0.004 * arc), True)
+                if len(approx) >= 3:
+                    yellow_cnts.append(approx)
+
+        red_cnts = []
+        cnts_r, _ = cv2.findContours(mask_red, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        for c in cnts_r:
+            if cv2.contourArea(c) > 400:
+                arc = cv2.arcLength(c, True)
+                approx = cv2.approxPolyDP(c, max(1.0, 0.004 * arc), True)
+                if len(approx) >= 3:
+                    red_cnts.append(approx)
+
+        clean_bldgs_mask = cv2.bitwise_or(mask_yellow, mask_red)
+        return yellow_cnts, red_cnts, clean_bldgs_mask
+
+    def extract_lots(self, bin_inv, quadra_cnt, gray_img=None, line_sensitivity=50, sort_mode="cadastral_ring", clean_bldgs_mask=None):
+        """Segmenta os lotes no interior do perímetro da quadra eliminando espaços (zero gap) e unificando as edificações aos lotes."""
         h_img, w_img = bin_inv.shape
         quadra_mask = np.zeros((h_img, w_img), dtype=np.uint8)
         cv2.drawContours(quadra_mask, [quadra_cnt], -1, 255, thickness=cv2.FILLED)
@@ -132,25 +193,60 @@ class QuadraProcessor:
         cv2.drawContours(closed_lines, [quadra_cnt], -1, 255, thickness=4)
 
         lots_binary = cv2.bitwise_and(cv2.bitwise_not(closed_lines), quadra_mask)
+
+        # Unificação de edificações ao corpo do lote:
+        # Cria passagens verticais conectando os recuos frontais e fundos através das edificações
+        # sem violar divisas laterais de lotes ou a linha central da quadra.
+        if clean_bldgs_mask is not None and np.sum(clean_bldgs_mask > 0) > 0:
+            bx, by, bw, bh = cv2.boundingRect(quadra_cnt)
+            mid_y = by + bh / 2.0
+            passage_mask = np.zeros_like(lots_binary)
+            num_bldgs, labels_bldgs, stats_bldgs, centroids_bldgs = cv2.connectedComponentsWithStats(clean_bldgs_mask)
+
+            for b in range(1, num_bldgs):
+                by_b = stats_bldgs[b, cv2.CC_STAT_TOP]
+                bh_b = stats_bldgs[b, cv2.CC_STAT_HEIGHT]
+                cx_b = int(centroids_bldgs[b][0])
+                cy_b = int(centroids_bldgs[b][1])
+                is_top = (cy_b < mid_y)
+                y_start = max(by + 10, by_b - 12)
+                y_end = min(by + bh - 10, by_b + bh_b + 12)
+                if is_top:
+                    y_end = min(y_end, int(mid_y - 8))
+                else:
+                    y_start = max(y_start, int(mid_y + 8))
+                cv2.line(passage_mask, (cx_b, y_start), (cx_b, y_end), 255, thickness=5)
+
+            passage_mask = cv2.bitwise_or(passage_mask, clean_bldgs_mask)
+            lots_binary = cv2.bitwise_or(lots_binary, passage_mask)
+            lots_binary = cv2.bitwise_and(lots_binary, cv2.bitwise_not(closed_lines))
+            lots_binary = cv2.bitwise_or(lots_binary, cv2.bitwise_and(passage_mask, quadra_mask))
+            cv2.drawContours(lots_binary, [quadra_cnt], -1, 0, thickness=5)
+
         kernel_erode = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
         lots_binary = cv2.morphologyEx(lots_binary, cv2.MORPH_OPEN, kernel_erode)
 
-        num_lots, lot_labels = cv2.connectedComponents(lots_binary, connectivity=8)
+        num_lots, lot_labels, stats_lots, _ = cv2.connectedComponentsWithStats(lots_binary, connectivity=8)
         quadra_area_px = cv2.contourArea(quadra_cnt)
 
         filtered_labels = np.zeros_like(lot_labels)
         current_id = 1
         for l in range(1, num_lots):
-            area = np.sum(lot_labels == l)
-            if 0.0015 * quadra_area_px < area < 0.35 * quadra_area_px:
-                filtered_labels[lot_labels == l] = current_id
+            x = stats_lots[l, cv2.CC_STAT_LEFT]
+            y = stats_lots[l, cv2.CC_STAT_TOP]
+            w_s = stats_lots[l, cv2.CC_STAT_WIDTH]
+            h_s = stats_lots[l, cv2.CC_STAT_HEIGHT]
+            area = stats_lots[l, cv2.CC_STAT_AREA]
+            if 0.002 * quadra_area_px < area < 0.35 * quadra_area_px:
+                sub_lbl = lot_labels[y:y+h_s, x:x+w_s]
+                comp = (sub_lbl == l)
+                filtered_labels[y:y+h_s, x:x+w_s][comp] = current_id
                 current_id += 1
 
         if current_id <= 1:
             return []
 
         # Tesselacao Voronoi via Distance Transform euclidiano (Zero Gap)
-        # Expande cada semente de lote ate o centro das linhas divisórias
         _, (row_idx, col_idx) = ndi.distance_transform_edt(filtered_labels == 0, return_indices=True)
         full_partition = filtered_labels[row_idx, col_idx]
         full_partition[quadra_mask == 0] = 0
@@ -182,8 +278,8 @@ class QuadraProcessor:
                 M = cv2.moments(c)
                 cx = M["m10"] / M["m00"] if M["m00"] > 0 else 0
                 cy = M["m01"] / M["m00"] if M["m00"] > 0 else 0
-                if cx > bx + 0.78 * bw:
-                    if cy < by + 0.30 * bh:
+                if cx > bx + 0.82 * bw:
+                    if cy < by + 0.35 * bh:
                         top.append((cx, cy, c))
                     else:
                         right.append((cx, cy, c))
@@ -191,9 +287,9 @@ class QuadraProcessor:
                     top.append((cx, cy, c))
                 else:
                     bottom.append((cx, cy, c))
-            top.sort(key=lambda x: x[0])     # Topo: esquerda -> direita (1..20)
-            right.sort(key=lambda x: x[1])   # Lateral: topo -> base (21..25)
-            bottom.sort(key=lambda x: -x[0]) # Base: direita -> esquerda (26..43)
+            top.sort(key=lambda x: x[0])     # Topo: esquerda -> direita (1..N)
+            right.sort(key=lambda x: x[1])   # Lateral: topo -> base
+            bottom.sort(key=lambda x: -x[0]) # Base: direita -> esquerda
             valid_lots = [item[2] for item in top + right + bottom]
         else:
             def get_centroid(c):
@@ -220,7 +316,6 @@ class QuadraProcessor:
         poly = Polygon(coords)
         if not poly.is_valid:
             poly = poly.buffer(0)
-        # Garante eliminação de qualquer furo interno decorrente de texto ou anotações
         if poly.geom_type == 'Polygon' and len(poly.interiors) > 0:
             poly = Polygon(poly.exterior.coords)
         return poly
@@ -230,7 +325,6 @@ class QuadraProcessor:
         coords = []
         for pt in contour:
             px, py = pt[0]
-            # Leaflet L.CRS.Simple usa [lat, lng] correspondente a [y, x]
             coords.append([int(px), int(h_img - py)])
         if coords[0] != coords[-1]:
             coords.append(coords[0])
@@ -252,7 +346,16 @@ class QuadraProcessor:
         bx, by, bw, bh = cv2.boundingRect(quadra_cnt)
         origin_bbox = (bx, by, bw, bh)
 
-        lot_cnts = self.extract_lots(bin_inv, quadra_cnt, gray, line_sensitivity=line_sensitivity, sort_mode=sort_mode)
+        # 1. Detectar edificações (Amarelas = Existentes, Vermelhas = Demolidas / Área Livre)
+        yellow_cnts, red_cnts, clean_bldgs_mask = self.detect_buildings(img, quadra_cnt)
+
+        # 2. Extrair lotes unificando as edificações aos lotes
+        lot_cnts = self.extract_lots(
+            bin_inv, quadra_cnt, gray,
+            line_sensitivity=line_sensitivity,
+            sort_mode=sort_mode,
+            clean_bldgs_mask=clean_bldgs_mask
+        )
 
         # Calibração fina automática por cota conhecida do lote padrão se informada
         if ref_cota_meters and float(ref_cota_meters) > 0:
@@ -288,10 +391,12 @@ class QuadraProcessor:
             }
         })
 
+        lot_polys = []
         for i, cnt in enumerate(lot_cnts, start=1):
             p = self.to_metric_polygon(cnt, origin_bbox)
             if p.area >= self.min_lot_area_m2:
                 num_lote = f"{i:02d}"
+                lot_polys.append((num_lote, p, cnt))
                 lot_records.append({
                     "NUM_LOTE": num_lote,
                     "QUADRA": quadra_code,
@@ -300,7 +405,6 @@ class QuadraProcessor:
                     "PERIM_M": round(p.length, 2),
                     "geometry": p
                 })
-                # Feature de pixel para o mapa
                 pixel_features.append({
                     "type": "Feature",
                     "properties": {
@@ -316,12 +420,100 @@ class QuadraProcessor:
                     }
                 })
 
+        # 3. Processar Edificações (Existentes e Demolidas)
+        bldg_records = []
+        edif_idx = 1
+
+        def assign_lot_to_building(poly_bldg):
+            centroid = poly_bldg.centroid
+            for num_l, p_l, _ in lot_polys:
+                if p_l.contains(centroid) or p_l.intersects(poly_bldg):
+                    return num_l
+            return ""
+
+        # Edificações Existentes (Amarelas)
+        for cnt in yellow_cnts:
+            p = self.to_metric_polygon(cnt, origin_bbox)
+            if p.area >= 2.0:
+                edif_id = f"ED-{edif_idx:02d}"
+                lote_num = assign_lot_to_building(p)
+                edif_idx += 1
+                bldg_records.append({
+                    "ID_EDIF": edif_id,
+                    "TIPO": "EXISTENTE",
+                    "STATUS": "ÁREA CONSTRUÍDA",
+                    "LOTE": lote_num,
+                    "QUADRA": quadra_code,
+                    "AREA_M2": round(p.area, 2),
+                    "PERIM_M": round(p.length, 2),
+                    "geometry": p
+                })
+                pixel_features.append({
+                    "type": "Feature",
+                    "properties": {
+                        "TIPO": "EDIFICACAO",
+                        "SUBTIPO": "EXISTENTE",
+                        "ID": edif_id,
+                        "STATUS": "ÁREA CONSTRUÍDA",
+                        "LOTE": lote_num,
+                        "AREA_M2": round(p.area, 2),
+                        "PERIM_M": round(p.length, 2),
+                        "COLOR": "#ca8a04",
+                        "FILL_COLOR": "#facc15",
+                        "FILL_OPACITY": 0.65
+                    },
+                    "geometry": {
+                        "type": "Polygon",
+                        "coordinates": [self.to_pixel_polygon(cnt, h_img)]
+                    }
+                })
+
+        # Edificações Demolidas / Áreas Livres (Vermelhas/Rosas)
+        for cnt in red_cnts:
+            p = self.to_metric_polygon(cnt, origin_bbox)
+            if p.area >= 2.0:
+                edif_id = f"DM-{edif_idx:02d}"
+                lote_num = assign_lot_to_building(p)
+                edif_idx += 1
+                bldg_records.append({
+                    "ID_EDIF": edif_id,
+                    "TIPO": "DEMOLIDA",
+                    "STATUS": "ÁREA LIVRE",
+                    "LOTE": lote_num,
+                    "QUADRA": quadra_code,
+                    "AREA_M2": round(p.area, 2),
+                    "PERIM_M": round(p.length, 2),
+                    "geometry": p
+                })
+                pixel_features.append({
+                    "type": "Feature",
+                    "properties": {
+                        "TIPO": "EDIFICACAO",
+                        "SUBTIPO": "DEMOLIDA",
+                        "ID": edif_id,
+                        "STATUS": "ÁREA LIVRE (DEMOLIDA)",
+                        "LOTE": lote_num,
+                        "AREA_M2": round(p.area, 2),
+                        "PERIM_M": round(p.length, 2),
+                        "COLOR": "#dc2626",
+                        "FILL_COLOR": "#f87171",
+                        "FILL_OPACITY": 0.50,
+                        "DASH_ARRAY": "4, 4"
+                    },
+                    "geometry": {
+                        "type": "Polygon",
+                        "coordinates": [self.to_pixel_polygon(cnt, h_img)]
+                    }
+                })
+
+        # Montar GeoDataFrames
         gdf_quadra = gpd.GeoDataFrame([{
             "ID_QUADRA": quadra_code,
             "BAIRRO": bairro,
             "AREA_M2": round(quadra_poly.area, 2),
             "PERIM_M": round(quadra_poly.length, 2),
             "QTD_LOTES": len(lot_records),
+            "QTD_EDIF": len(bldg_records),
             "ESCALA": f"1:{int(self.scale_denom)}",
             "geometry": quadra_poly
         }], crs=f"EPSG:{self.epsg}")
@@ -330,6 +522,11 @@ class QuadraProcessor:
             gdf_lots = gpd.GeoDataFrame(lot_records, crs=f"EPSG:{self.epsg}")
         else:
             gdf_lots = gpd.GeoDataFrame(columns=["NUM_LOTE", "QUADRA", "BAIRRO", "AREA_M2", "PERIM_M", "geometry"], crs=f"EPSG:{self.epsg}")
+
+        if bldg_records:
+            gdf_edificacoes = gpd.GeoDataFrame(bldg_records, crs=f"EPSG:{self.epsg}")
+        else:
+            gdf_edificacoes = gpd.GeoDataFrame(columns=["ID_EDIF", "TIPO", "STATUS", "LOTE", "QUADRA", "AREA_M2", "PERIM_M", "geometry"], crs=f"EPSG:{self.epsg}")
 
         # Gerar imagem de preview
         vis = img.copy()
@@ -347,7 +544,18 @@ class QuadraProcessor:
                 cy = int(M["m01"] / M["m00"])
                 cv2.putText(vis, str(i), (cx-10, cy+6), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 0, 255), 2)
 
+        # Destacar Edificações no preview
+        for cnt in yellow_cnts:
+            cv2.drawContours(vis, [cnt], -1, (0, 215, 255), 2)
+        for cnt in red_cnts:
+            cv2.drawContours(vis, [cnt], -1, (0, 0, 255), 2)
+
         cv2.addWeighted(overlay, 0.30, vis, 0.70, 0, vis)
+
+        existentes = [b for b in bldg_records if b["TIPO"] == "EXISTENTE"]
+        demolidas = [b for b in bldg_records if b["TIPO"] == "DEMOLIDA"]
+        area_construida = round(sum(b["AREA_M2"] for b in existentes), 2)
+        area_demolida = round(sum(b["AREA_M2"] for b in demolidas), 2)
 
         stats = {
             "quadra_code": quadra_code,
@@ -355,6 +563,11 @@ class QuadraProcessor:
             "quadra_area_m2": round(quadra_poly.area, 2),
             "quadra_perim_m": round(quadra_poly.length, 2),
             "total_lots": len(lot_records),
+            "total_edificacoes": len(bldg_records),
+            "edificacoes_existentes": len(existentes),
+            "edificacoes_demolidas": len(demolidas),
+            "area_construida_m2": area_construida,
+            "area_livre_demolida_m2": area_demolida,
             "scale": f"1:{int(self.scale_denom)}",
             "resolution_m_px": round(self.meters_per_pixel, 4),
             "dimensions_px": [w_img, h_img]
@@ -365,4 +578,4 @@ class QuadraProcessor:
             "features": pixel_features
         }
 
-        return gdf_quadra, gdf_lots, vis, img, stats, geojson_pixel
+        return gdf_quadra, gdf_lots, gdf_edificacoes, vis, img, stats, geojson_pixel

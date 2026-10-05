@@ -11,6 +11,7 @@ app/storage/cache/*
 app/storage/outputs/*
 !app/storage/outputs/.gitkeep
 test_outputs/
+output/
 
 # Temporary generated test plots
 cad_lines_test.png
