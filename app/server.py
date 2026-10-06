@@ -178,6 +178,18 @@ def process():
                     "perim_m": row.get("PERIM_M", 0)
                 })
 
+        # Preparar dados tabulares das linhas / divisas do traçado
+        divisas_table = []
+        if not gdf_divisas.empty:
+            for _, row in gdf_divisas.iterrows():
+                divisas_table.append({
+                    "id_linha": row.get("ID_LINHA", ""),
+                    "tipo": row.get("TIPO", ""),
+                    "lote_a": row.get("LOTE_A", ""),
+                    "lote_b": row.get("LOTE_B", ""),
+                    "compr_m": row.get("COMPR_M", 0)
+                })
+
         TASKS[task_id].update({
             "status": "processed",
             "exported_files": exported_files,
@@ -190,6 +202,7 @@ def process():
             "stats": stats,
             "geojson_pixel": geojson_pixel,
             "lots": lots_table,
+            "divisas": divisas_table,
             "orig_url": f"/cache/{task_id}/original.jpg",
             "prev_url": f"/cache/{task_id}/preview.jpg"
         })

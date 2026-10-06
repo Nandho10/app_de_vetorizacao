@@ -267,7 +267,7 @@
             <i class="fa-solid fa-layer-group"></i> Visualizador Interativo
           </button>
           <button id="tabTable" onclick="switchTab('table')" class="px-3 py-1.5 rounded-md font-medium text-slate-300 hover:bg-slate-800 flex items-center gap-1.5">
-            <i class="fa-solid fa-table-list"></i> Lotes (<span id="tabCount">0</span>)
+            <i class="fa-solid fa-route text-red-400"></i> Traçado das Linhas (<span id="tabCount">0</span>)
           </button>
           <button id="tabPreview" onclick="switchTab('preview')" class="px-3 py-1.5 rounded-md font-medium text-slate-300 hover:bg-slate-800 flex items-center gap-1.5">
             <i class="fa-solid fa-image"></i> Pré-visualização OpenCV
@@ -285,17 +285,13 @@
             <span>Quadra</span>
           </label>
           <label class="flex items-center space-x-1 cursor-pointer">
-            <input type="checkbox" id="chkLots" checked onchange="toggleLotsLayer()" class="accent-emerald-500">
-            <span>Lotes</span>
+            <input type="checkbox" id="chkDivisas" checked onchange="toggleDivisasLayer()" class="accent-red-500">
+            <span class="text-red-400 font-bold">Traçado dos Lotes (Linhas)</span>
           </label>
           <label class="flex items-center space-x-1 cursor-pointer">
-            <input type="checkbox" id="chkDivisas" checked onchange="toggleDivisasLayer()" class="accent-red-500">
-            <span class="text-red-400 font-semibold">Divisas (Linhas)</span>
+            <input type="checkbox" id="chkLabels" checked onchange="toggleLabelsLayer()" class="accent-amber-500">
+            <span>Numeração dos Lotes</span>
           </label>
-          <div class="flex items-center space-x-1 pl-1 border-l border-slate-700/60">
-            <span class="text-[10px] text-slate-400">Opac:</span>
-            <input type="range" id="opacitySlider" min="0" max="100" value="70" oninput="changeOpacity(this.value)" class="w-14 accent-emerald-500">
-          </div>
         </div>
       </div>
 
@@ -311,31 +307,64 @@
         </div>
       </div>
 
-      <!-- Container: Lots Table -->
+      <!-- Container: Lines & Lots Table -->
       <div id="tableView" class="flex-1 p-6 overflow-y-auto hidden">
-        <div class="max-w-4xl mx-auto bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-xl">
-          <div class="px-6 py-4 border-b border-slate-800 flex justify-between items-center">
-            <h3 class="text-sm font-semibold text-slate-200 flex items-center gap-2">
-              <i class="fa-solid fa-list-ol text-emerald-400"></i>
-              Relação de Lotes Fiscais Extraídos
-            </h3>
-            <span id="tableSummary" class="text-xs text-slate-400">Total: 0 lotes</span>
+        <div class="max-w-5xl mx-auto bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-xl space-y-6 p-4">
+          
+          <!-- Tabela de Linhas do Traçado -->
+          <div>
+            <div class="px-4 py-3 border-b border-slate-800 flex justify-between items-center bg-slate-800/40 rounded-t-lg">
+              <h3 class="text-sm font-semibold text-slate-200 flex items-center gap-2">
+                <i class="fa-solid fa-route text-red-400"></i>
+                Traçado das Linhas e Divisas dos Lotes (Geometria LineString)
+              </h3>
+              <span id="tableSummary" class="text-xs text-red-300 font-mono font-semibold">Total: 0 linhas</span>
+            </div>
+            <div class="overflow-x-auto max-h-[380px] border border-slate-800/60 rounded-b-lg">
+              <table class="w-full text-left text-xs text-slate-300">
+                <thead class="bg-slate-800/90 text-slate-400 font-semibold border-b border-slate-700/50 sticky top-0">
+                  <tr>
+                    <th class="px-4 py-2.5">ID Linha</th>
+                    <th class="px-4 py-2.5">Tipo de Divisa</th>
+                    <th class="px-4 py-2.5">Lote A</th>
+                    <th class="px-4 py-2.5">Confrontante</th>
+                    <th class="px-4 py-2.5">Extensão (m)</th>
+                    <th class="px-4 py-2.5 text-center">Localizar</th>
+                  </tr>
+                </thead>
+                <tbody id="divisasTableBody" class="divide-y divide-slate-800/60 font-mono">
+                  <!-- Linhas injetadas dinamicamente -->
+                </tbody>
+              </table>
+            </div>
           </div>
-          <div class="overflow-x-auto">
-            <table class="w-full text-left text-xs text-slate-300">
-              <thead class="bg-slate-800/80 text-slate-400 font-semibold border-b border-slate-700/50">
-                <tr>
-                  <th class="px-6 py-3">Lote #</th>
-                  <th class="px-6 py-3">Área Calculada (m²)</th>
-                  <th class="px-6 py-3">Perímetro (m)</th>
-                  <th class="px-6 py-3">Ações</th>
-                </tr>
-              </thead>
-              <tbody id="lotsTableBody" class="divide-y divide-slate-800/60 font-mono">
-                <!-- Rows injected dynamically -->
-              </tbody>
-            </table>
+
+          <!-- Tabela Resumo dos Lotes -->
+          <div class="border-t border-slate-800/80 pt-4">
+            <div class="px-4 py-2.5 border-b border-slate-800 flex justify-between items-center bg-slate-800/20 rounded-t-lg">
+              <h4 class="text-xs font-semibold text-slate-300 flex items-center gap-2">
+                <i class="fa-solid fa-shapes text-emerald-400"></i>
+                Relação de Lotes Detectados
+              </h4>
+              <span id="lotsSummary" class="text-xs text-slate-400">Total: 0 lotes</span>
+            </div>
+            <div class="overflow-x-auto max-h-[240px] border border-slate-800/60 rounded-b-lg">
+              <table class="w-full text-left text-xs text-slate-300">
+                <thead class="bg-slate-800/90 text-slate-400 font-semibold border-b border-slate-700/50 sticky top-0">
+                  <tr>
+                    <th class="px-4 py-2">Lote #</th>
+                    <th class="px-4 py-2">Área (m²)</th>
+                    <th class="px-4 py-2">Perímetro (m)</th>
+                    <th class="px-4 py-2 text-center">Localizar</th>
+                  </tr>
+                </thead>
+                <tbody id="lotsTableBody" class="divide-y divide-slate-800/60 font-mono">
+                  <!-- Lotes injetados dinamicamente -->
+                </tbody>
+              </table>
+            </div>
           </div>
+
         </div>
       </div>
 
@@ -557,12 +586,13 @@
       document.getElementById('statPerimQuadra').innerText = Number(data.stats.quadra_perim_m).toLocaleString('pt-BR') + ' m';
       document.getElementById('statAreaMediaLote').innerText = Number(data.stats.area_media_lote_m2 || 0).toLocaleString('pt-BR') + ' m²';
       if (document.getElementById('statTotalDivisas')) {
-        document.getElementById('statTotalDivisas').innerText = data.stats.total_divisas || 0;
+        document.getElementById('statTotalDivisas').innerText = data.stats.total_divisas || (data.divisas ? data.divisas.length : 0);
       }
       if (document.getElementById('statExtensaoDivisas')) {
         document.getElementById('statExtensaoDivisas').innerText = Number(data.stats.extensao_divisas_m || 0).toLocaleString('pt-BR') + ' m';
       }
-      document.getElementById('tabCount').innerText = data.stats.total_lots;
+      const totalLinhas = data.divisas ? data.divisas.length : (data.stats.total_divisas || 0);
+      document.getElementById('tabCount').innerText = totalLinhas;
 
       // Dimensões da imagem original
       const [w, h] = data.stats.dimensions_px;
@@ -572,18 +602,18 @@
       // Limpar camadas anteriores
       if (rasterOverlay) map.removeLayer(rasterOverlay);
       if (quadraLayer) map.removeLayer(quadraLayer);
-      if (lotsLayer) map.removeLayer(lotsLayer);
       if (divisasLayer) map.removeLayer(divisasLayer);
       labelMarkers.forEach(m => map.removeLayer(m));
       labelMarkers = [];
+      divisaLayersMap = {};
 
       // 1. Overlay da prancha original
       rasterOverlay = L.imageOverlay(data.orig_url, bounds).addTo(map);
 
       // 2. Separar feições vetoriais
       const quadraFeatures = data.geojson_pixel.features.filter(f => f.properties.TIPO === 'QUADRA');
-      const lotsFeatures = data.geojson_pixel.features.filter(f => f.properties.TIPO === 'LOTE');
       const divisaFeatures = data.geojson_pixel.features.filter(f => f.properties.TIPO === 'DIVISA');
+      const rotuloFeatures = data.geojson_pixel.features.filter(f => f.properties.TIPO === 'ROTULO_LOTE');
 
       // Quadra Layer
       quadraLayer = L.geoJSON({type: 'FeatureCollection', features: quadraFeatures}, {
@@ -595,47 +625,7 @@
         }
       }).addTo(map);
 
-      // Lotes Layer (Zero Gap)
-      lotsLayer = L.geoJSON({type: 'FeatureCollection', features: lotsFeatures}, {
-        coordsToLatLng: function(coords) { return [coords[1], coords[0]]; },
-        style: function(feature) {
-          return {
-            color: '#16a34a',
-            weight: 2,
-            fillColor: '#22c55e',
-            fillOpacity: 0.22
-          };
-        },
-        onEachFeature: function(feature, layer) {
-          const props = feature.properties;
-          layer.bindTooltip(`<b>Lote ${props.ID}</b><br>Área: ${Number(props.AREA_M2).toLocaleString('pt-BR')} m²<br>Perímetro: ${Number(props.PERIM_M).toLocaleString('pt-BR')} m`, {
-            sticky: true,
-            className: 'lot-tooltip'
-          });
-
-          layer.on('mouseover', function() {
-            this.setStyle({weight: 3, fillColor: '#22c55e', fillOpacity: 0.45});
-          });
-          layer.on('mouseout', function() {
-            lotsLayer.resetStyle(this);
-          });
-
-          const center = layer.getBounds().getCenter();
-          const marker = L.marker(center, {
-            lotId: props.ID,
-            icon: L.divIcon({
-              className: 'lot-label',
-              html: props.ID,
-              iconSize: [24, 18],
-              iconAnchor: [12, 9]
-            })
-          });
-          labelMarkers.push(marker);
-          marker.addTo(map);
-        }
-      }).addTo(map);
-
-      // 3. Divisas Layer (Linhas Vermelhas)
+      // 3. Divisas Layer (Traçado dos Lotes em Linhas Vermelhas)
       divisasLayer = L.geoJSON({type: 'FeatureCollection', features: divisaFeatures}, {
         coordsToLatLng: function(coords) { return [coords[1], coords[0]]; },
         style: function(feature) {
@@ -647,7 +637,8 @@
         },
         onEachFeature: function(feature, layer) {
           const props = feature.properties;
-          layer.bindTooltip(`<b>${props.ID} (${props.TIPO_DIVISA})</b><br>Entre: Lote ${props.LOTE_A} e Lote ${props.LOTE_B}<br>Extensão: ${props.COMPR_M} m`, {
+          divisaLayersMap[props.ID] = layer;
+          layer.bindTooltip(`<b>${props.ID} (${props.TIPO_DIVISA})</b><br>Entre: Lote ${props.LOTE_A} e ${props.LOTE_B}<br>Extensão: ${props.COMPR_M} m`, {
             sticky: true,
             className: 'lot-tooltip'
           });
@@ -660,48 +651,107 @@
         }
       }).addTo(map);
 
+      // 4. Rótulos Numéricos dos Lotes no Centroide
+      rotuloFeatures.forEach(f => {
+        const coords = f.geometry.coordinates; // [px, h_img - py]
+        const latLng = [coords[1], coords[0]];
+        const marker = L.marker(latLng, {
+          lotId: f.properties.ID,
+          icon: L.divIcon({
+            className: 'lot-label',
+            html: f.properties.ID,
+            iconSize: [24, 18],
+            iconAnchor: [12, 9]
+          })
+        });
+        labelMarkers.push(marker);
+        marker.addTo(map);
+      });
+
       // Ajustar visualização do mapa para a quadra
       map.fitBounds(quadraLayer.getBounds(), {padding: [40, 40]});
 
-      // Atualizar tabela de lotes com edição de numeração
-      const tbody = document.getElementById('lotsTableBody');
-      tbody.innerHTML = '';
-      data.lots.forEach(lot => {
-        const tr = document.createElement('tr');
-        tr.className = 'hover:bg-slate-800/50 transition';
-        tr.innerHTML = `
-          <td class="px-6 py-2.5 font-bold text-emerald-400 flex items-center gap-1.5">
-            <span class="text-slate-400 text-xs font-normal">Lote</span>
-            <input type="text" value="${lot.num_lote}" onchange="updateLotId('${lot.num_lote}', this.value)" class="w-14 bg-slate-900 border border-slate-700 focus:border-emerald-500 rounded px-1.5 py-0.5 text-emerald-300 font-bold text-center text-xs">
-          </td>
-          <td class="px-6 py-2.5 font-mono">${Number(lot.area_m2).toLocaleString('pt-BR')} m²</td>
-          <td class="px-6 py-2.5 font-mono text-slate-400">${Number(lot.perim_m).toLocaleString('pt-BR')} m</td>
-          <td class="px-6 py-2.5">
-            <button onclick="highlightLot('${lot.num_lote}')" class="text-xs text-sky-400 hover:text-sky-300">
-              <i class="fa-solid fa-magnifying-glass mr-1"></i>Ver
-            </button>
-          </td>
-        `;
-        tbody.appendChild(tr);
-      });
-      document.getElementById('tableSummary').innerText = `Total: ${data.lots.length} lotes encontrados`;
+      // 5. Preencher Tabela de Linhas do Traçado
+      const tbodyDivisas = document.getElementById('divisasTableBody');
+      tbodyDivisas.innerHTML = '';
+      if (data.divisas && data.divisas.length > 0) {
+        data.divisas.forEach(d => {
+          let badgeTipo = '';
+          if (d.tipo === 'DIVISA_LATERAL') {
+            badgeTipo = '<span class="text-sky-400 bg-sky-950/70 border border-sky-800/60 px-2 py-0.5 rounded text-[10px]">Divisa Lateral</span>';
+          } else if (d.tipo === 'DIVISA_FUNDOS') {
+            badgeTipo = '<span class="text-indigo-400 bg-indigo-950/70 border border-indigo-800/60 px-2 py-0.5 rounded text-[10px]">Divisa de Fundos</span>';
+          } else if (d.tipo === 'TESTADA_FRONTAL') {
+            badgeTipo = '<span class="text-emerald-400 bg-emerald-950/70 border border-emerald-800/60 px-2 py-0.5 rounded text-[10px]">Testada Frontal (Rua)</span>';
+          } else {
+            badgeTipo = `<span class="text-slate-300">${d.tipo}</span>`;
+          }
+
+          const tr = document.createElement('tr');
+          tr.className = 'hover:bg-slate-800/50 transition';
+          tr.innerHTML = `
+            <td class="px-4 py-2 font-bold text-red-400">${d.id_linha}</td>
+            <td class="px-4 py-2">${badgeTipo}</td>
+            <td class="px-4 py-2 text-slate-100 font-bold">Lote ${d.lote_a}</td>
+            <td class="px-4 py-2 text-slate-300">${d.lote_b === 'LOGRADOURO' ? '<span class="text-amber-400 font-semibold">Logradouro / Rua</span>' : 'Lote ' + d.lote_b}</td>
+            <td class="px-4 py-2 text-emerald-300 font-mono">${Number(d.compr_m).toFixed(2)} m</td>
+            <td class="px-4 py-2 text-center">
+              <button onclick="highlightLine('${d.id_linha}')" class="text-xs bg-slate-800 hover:bg-slate-700 text-sky-400 px-2.5 py-1 rounded border border-slate-700 transition flex items-center gap-1 mx-auto">
+                <i class="fa-solid fa-crosshairs"></i> Ver
+              </button>
+            </td>
+          `;
+          tbodyDivisas.appendChild(tr);
+        });
+        document.getElementById('tableSummary').innerText = `Total: ${data.divisas.length} linhas de traçado`;
+      }
+
+      // 6. Preencher Tabela Resumo dos Lotes
+      const tbodyLots = document.getElementById('lotsTableBody');
+      tbodyLots.innerHTML = '';
+      if (data.lots && data.lots.length > 0) {
+        data.lots.forEach(lot => {
+          const tr = document.createElement('tr');
+          tr.className = 'hover:bg-slate-800/50 transition';
+          tr.innerHTML = `
+            <td class="px-4 py-2 font-bold text-emerald-400 flex items-center gap-1.5">
+              <span class="text-slate-400 text-xs font-normal">Lote</span>
+              <input type="text" value="${lot.num_lote}" onchange="updateLotId('${lot.num_lote}', this.value)" class="w-14 bg-slate-900 border border-slate-700 focus:border-emerald-500 rounded px-1.5 py-0.5 text-emerald-300 font-bold text-center text-xs">
+            </td>
+            <td class="px-4 py-2 font-mono text-slate-200">${Number(lot.area_m2).toLocaleString('pt-BR')} m²</td>
+            <td class="px-4 py-2 font-mono text-slate-400">${Number(lot.perim_m).toLocaleString('pt-BR')} m</td>
+            <td class="px-4 py-2 text-center">
+              <button onclick="highlightLot('${lot.num_lote}')" class="text-xs bg-slate-800 hover:bg-slate-700 text-emerald-400 px-2.5 py-1 rounded border border-slate-700 transition flex items-center gap-1 mx-auto">
+                <i class="fa-solid fa-magnifying-glass"></i> Ver Lote
+              </button>
+            </td>
+          `;
+          tbodyLots.appendChild(tr);
+        });
+        document.getElementById('lotsSummary').innerText = `Total: ${data.lots.length} lotes detectados`;
+      }
 
       // Atualizar imagem OpenCV
       document.getElementById('opencvPreviewImg').src = data.prev_url;
     }
 
+    // Localizar e destacar uma linha específica no mapa
+    function highlightLine(lineId) {
+      switchTab('map');
+      const layer = divisaLayersMap[lineId];
+      if (layer) {
+        map.fitBounds(layer.getBounds(), {padding: [140, 140]});
+        layer.setStyle({weight: 6, color: '#fbbf24'});
+        layer.openTooltip();
+        setTimeout(() => {
+          divisasLayer.resetStyle(layer);
+        }, 3000);
+      }
+    }
+
     // Atualizar ID do lote interativamente
     function updateLotId(oldId, newId) {
       if (!newId || oldId === newId) return;
-      if (lotsLayer) {
-        lotsLayer.eachLayer(layer => {
-          if (layer.feature && String(layer.feature.properties.ID) === String(oldId)) {
-            layer.feature.properties.ID = newId;
-            const props = layer.feature.properties;
-            layer.setTooltipContent(`<b>Lote ${props.ID}</b><br>Área: ${Number(props.AREA_M2).toLocaleString('pt-BR')} m²<br>Perímetro: ${Number(props.PERIM_M).toLocaleString('pt-BR')} m`);
-          }
-        });
-      }
       labelMarkers.forEach(m => {
         if (m.options && String(m.options.lotId) === String(oldId)) {
           m.options.lotId = newId;
@@ -715,17 +765,25 @@
       });
     }
 
-    // Destaque de lote pelo botão da tabela
+    // Destaque de todas as divisas de um lote pelo botão da tabela
     function highlightLot(lotId) {
       switchTab('map');
-      if (!lotsLayer) return;
-      lotsLayer.eachLayer(layer => {
-        if (layer.feature && layer.feature.properties.ID === lotId) {
-          map.fitBounds(layer.getBounds(), {padding: [100, 100]});
-          layer.setStyle({weight: 4, fillColor: '#f97316', fillOpacity: 0.6});
-          setTimeout(() => lotsLayer.resetStyle(layer), 2500);
+      if (!divisasLayer) return;
+      let matchedBounds = null;
+      divisasLayer.eachLayer(layer => {
+        if (layer.feature && (String(layer.feature.properties.LOTE_A) === String(lotId) || String(layer.feature.properties.LOTE_B) === String(lotId))) {
+          if (!matchedBounds) {
+            matchedBounds = L.latLngBounds(layer.getBounds());
+          } else {
+            matchedBounds.extend(layer.getBounds());
+          }
+          layer.setStyle({weight: 5, color: '#f97316'});
+          setTimeout(() => divisasLayer.resetStyle(layer), 3000);
         }
       });
+      if (matchedBounds) {
+        map.fitBounds(matchedBounds, {padding: [100, 100]});
+      }
     }
 
     // Alternar abas
@@ -768,16 +826,6 @@
         map.removeLayer(quadraLayer);
       }
     }
-    function toggleLotsLayer() {
-      if (!lotsLayer) return;
-      if (document.getElementById('chkLots').checked) {
-        map.addLayer(lotsLayer);
-        labelMarkers.forEach(m => map.addLayer(m));
-      } else {
-        map.removeLayer(lotsLayer);
-        labelMarkers.forEach(m => map.removeLayer(m));
-      }
-    }
     function toggleDivisasLayer() {
       if (!divisasLayer) return;
       if (document.getElementById('chkDivisas').checked) {
@@ -786,10 +834,12 @@
         map.removeLayer(divisasLayer);
       }
     }
-    function changeOpacity(val) {
-      if (!lotsLayer) return;
-      const op = val / 100.0;
-      lotsLayer.setStyle({fillOpacity: op * 0.35});
+    function toggleLabelsLayer() {
+      const show = document.getElementById('chkLabels').checked;
+      labelMarkers.forEach(m => {
+        if (show) map.addLayer(m);
+        else map.removeLayer(m);
+      });
     }
 
     function downloadFormat(fmt) {

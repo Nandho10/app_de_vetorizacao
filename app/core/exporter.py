@@ -16,6 +16,7 @@ class VectorExporter:
     def export_all(gdf_quadra, gdf_lots, output_dir, base_name="quadra_vetorizada", crs_epsg=None, gdf_edificacoes=None, gdf_divisas=None):
         """
         Gera todos os formatos e retorna um dicionário com os caminhos dos arquivos gerados.
+        Entrega o traçado dos lotes como geometria primária de Linhas (LineString).
         """
         os.makedirs(output_dir, exist_ok=True)
         results = {}
@@ -23,15 +24,21 @@ class VectorExporter:
         has_edif = gdf_edificacoes is not None and not gdf_edificacoes.empty
         has_divisas = gdf_divisas is not None and not gdf_divisas.empty
 
+        # Limpar colunas auxiliares de processamento de imagem antes de exportar para GIS
+        clean_divisas = None
+        if has_divisas:
+            cols_to_drop = [c for c in ["cv_pt1", "cv_pt2"] if c in gdf_divisas.columns]
+            clean_divisas = gdf_divisas.drop(columns=cols_to_drop)
+
         # 1. GeoPackage (.gpkg)
         gpkg_path = os.path.join(output_dir, f"{base_name}.gpkg")
         if os.path.exists(gpkg_path):
             os.remove(gpkg_path)
         gdf_quadra.to_file(gpkg_path, layer="quadra", driver="GPKG")
+        if clean_divisas is not None and not clean_divisas.empty:
+            clean_divisas.to_file(gpkg_path, layer="tracado_lotes", driver="GPKG")
         if not gdf_lots.empty:
-            gdf_lots.to_file(gpkg_path, layer="lotes", driver="GPKG")
-        if has_divisas:
-            gdf_divisas.to_file(gpkg_path, layer="divisas", driver="GPKG")
+            gdf_lots.to_file(gpkg_path, layer="lotes_poligonos", driver="GPKG")
         if has_edif:
             gdf_edificacoes.to_file(gpkg_path, layer="edificacoes", driver="GPKG")
         results["gpkg"] = gpkg_path
@@ -43,15 +50,15 @@ class VectorExporter:
             d = row.to_dict()
             d["TIPO_CAMADA"] = "QUADRA"
             features.append(d)
+        if clean_divisas is not None and not clean_divisas.empty:
+            for _, row in clean_divisas.iterrows():
+                d = row.to_dict()
+                d["TIPO_CAMADA"] = "TRACADO_LOTES"
+                features.append(d)
         if not gdf_lots.empty:
             for _, row in gdf_lots.iterrows():
                 d = row.to_dict()
-                d["TIPO_CAMADA"] = "LOTE"
-                features.append(d)
-        if has_divisas:
-            for _, row in gdf_divisas.iterrows():
-                d = row.to_dict()
-                d["TIPO_CAMADA"] = "DIVISA"
+                d["TIPO_CAMADA"] = "LOTES_POLIGONOS"
                 features.append(d)
         if has_edif:
             for _, row in gdf_edificacoes.iterrows():
@@ -67,12 +74,12 @@ class VectorExporter:
         with tempfile.TemporaryDirectory() as temp_shp_dir:
             shp_q = os.path.join(temp_shp_dir, "quadra.shp")
             gdf_quadra.to_file(shp_q)
+            if clean_divisas is not None and not clean_divisas.empty:
+                shp_tracado = os.path.join(temp_shp_dir, "tracado_lotes.shp")
+                clean_divisas.to_file(shp_tracado)
             if not gdf_lots.empty:
-                shp_l = os.path.join(temp_shp_dir, "lotes.shp")
+                shp_l = os.path.join(temp_shp_dir, "lotes_poligonos.shp")
                 gdf_lots.to_file(shp_l)
-            if has_divisas:
-                shp_d = os.path.join(temp_shp_dir, "divisas.shp")
-                gdf_divisas.to_file(shp_d)
             if has_edif:
                 shp_e = os.path.join(temp_shp_dir, "edificacoes.shp")
                 gdf_edificacoes.to_file(shp_e)
@@ -120,19 +127,19 @@ class VectorExporter:
                     f.write('    </coordinates></LinearRing></outerBoundaryIs></Polygon>\n')
                     f.write('  </Placemark>\n')
 
-                # Divisas (Linhas Vermelhas) Placemarks
-                if has_divisas:
-                    for _, row in gdf_divisas.iterrows():
+                # Divisas e Testadas (Linhas Vermelhas) Placemarks
+                if clean_divisas is not None and not clean_divisas.empty:
+                    for _, row in clean_divisas.iterrows():
                         line = row.geometry
                         if line.geom_type == 'LineString':
-                            id_div = row.get("ID_DIVISA", "")
+                            id_div = row.get("ID_LINHA", row.get("ID_DIVISA", ""))
                             tipo = row.get("TIPO", "")
                             lote_a = row.get("LOTE_A", "")
                             lote_b = row.get("LOTE_B", "")
                             compr = row.get("COMPR_M", "")
                             f.write('  <Placemark>\n')
                             f.write(f'    <name>{id_div} ({tipo})</name>\n')
-                            f.write(f'    <description>Tipo: {tipo} | Entre: Lote {lote_a} e Lote {lote_b} | Extensão: {compr} m</description>\n')
+                            f.write(f'    <description>Tipo: {tipo} | Entre: Lote {lote_a} e {lote_b} | Extensão: {compr} m</description>\n')
                             f.write('    <styleUrl>#divisaStyle</styleUrl>\n')
                             f.write('    <LineString><coordinates>\n')
                             for x, y in line.coords:

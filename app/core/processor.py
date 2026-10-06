@@ -310,8 +310,11 @@ class QuadraProcessor:
 
     def extract_divisas(self, full_partition, quadra_cnt, origin_bbox, lot_id_map, quadra_code, bairro, h_img):
         """
-        Extrai a geometria de linhas (LineString) das divisas internas (laterais e fundos)
-        e do perímetro da quadra com ajuste retilíneo e métrica real.
+        Extrai a geometria de linhas (LineString) do traçado completo dos lotes:
+        - Divisas Laterais (entre lotes adjacentes)
+        - Divisas de Fundos (entre lotes de quadras opostas)
+        - Testadas Frontais (divisa do lote com o logradouro / rua)
+        Entrega uma malha contínua de linhas com ajuste linear PCA e métrica real (Zero Gap).
         """
         bx, by, bw, bh = origin_bbox
         shift_r = full_partition[:, 1:]
@@ -319,6 +322,7 @@ class QuadraProcessor:
         shift_d = full_partition[1:, :]
         orig_d = full_partition[:-1, :]
 
+        # 1. Divisas internas (entre pares de lotes)
         pairs = set()
         for a, b in zip(orig_r.flat, shift_r.flat):
             if a != b and a > 0 and b > 0:
@@ -327,10 +331,20 @@ class QuadraProcessor:
             if a != b and a > 0 and b > 0:
                 pairs.add(tuple(sorted((int(a), int(b)))) )
 
+        # 2. Divisas externas / testadas frontais (fronteira do lote com o exterior / logradouro)
+        ext_lids = set()
+        for a, b in zip(orig_r.flat, shift_r.flat):
+            if (a > 0 and b == 0): ext_lids.add(int(a))
+            elif (a == 0 and b > 0): ext_lids.add(int(b))
+        for a, b in zip(orig_d.flat, shift_d.flat):
+            if (a > 0 and b == 0): ext_lids.add(int(a))
+            elif (a == 0 and b > 0): ext_lids.add(int(b))
+
         divisa_records = []
         divisa_features_pixel = []
         line_idx = 1
 
+        # Processar divisas internas (Laterais e Fundos)
         for i, j in sorted(pairs):
             mask_v = ((orig_r == i) & (shift_r == j)) | ((orig_r == j) & (shift_r == i))
             y_v, x_v = np.where(mask_v)
@@ -376,7 +390,7 @@ class QuadraProcessor:
             geom_line = LineString([(round(mx1, 3), round(my1, 3)), (round(mx2, 3), round(my2, 3))])
 
             divisa_records.append({
-                "ID_DIVISA": id_divisa,
+                "ID_LINHA": id_divisa,
                 "QUADRA": quadra_code,
                 "BAIRRO": bairro,
                 "TIPO": tipo,
@@ -409,37 +423,86 @@ class QuadraProcessor:
             })
             line_idx += 1
 
-        # Adicionar segmentos do perímetro da quadra na camada de linhas
-        n_pts = len(quadra_cnt)
-        for k in range(n_pts):
-            ptA = quadra_cnt[k][0]
-            ptB = quadra_cnt[(k + 1) % n_pts][0]
-            len_seg_px = np.hypot(ptB[0] - ptA[0], ptB[1] - ptA[1])
-            len_seg_m = len_seg_px * self.meters_per_pixel
-            if len_seg_m >= 0.5:
-                smx1 = (ptA[0] - bx) * self.meters_per_pixel
-                smy1 = (bh - (ptA[1] - by)) * self.meters_per_pixel
-                smx2 = (ptB[0] - bx) * self.meters_per_pixel
-                smy2 = (bh - (ptB[1] - by)) * self.meters_per_pixel
-                id_perim = f"PERIM-{k+1:02d}"
-                divisa_records.append({
-                    "ID_DIVISA": id_perim,
-                    "QUADRA": quadra_code,
-                    "BAIRRO": bairro,
-                    "TIPO": "PERIMETRO_QUADRA",
-                    "LOTE_A": "QUADRA",
-                    "LOTE_B": "EXTERNO",
-                    "COMPR_M": round(len_seg_m, 2),
-                    "geometry": LineString([(round(smx1, 3), round(smy1, 3)), (round(smx2, 3), round(smy2, 3))]),
-                    "cv_pt1": (int(ptA[0]), int(ptA[1])),
-                    "cv_pt2": (int(ptB[0]), int(ptB[1]))
-                })
+        # Processar testadas frontais de cada lote (fronteira com logradouro / rua)
+        for lid in sorted(ext_lids):
+            mask_v = ((orig_r == lid) & (shift_r == 0)) | ((orig_r == 0) & (shift_r == lid))
+            y_v, x_v = np.where(mask_v)
+            pts_v = list(zip(x_v + 0.5, y_v.astype(float)))
+
+            mask_h = ((orig_d == lid) & (shift_d == 0)) | ((orig_d == 0) & (shift_d == lid))
+            y_h, x_h = np.where(mask_h)
+            pts_h = list(zip(x_h.astype(float), y_h + 0.5))
+
+            all_pts = np.array(pts_v + pts_h)
+            if len(all_pts) < 4:
+                continue
+
+            mean = np.mean(all_pts, axis=0)
+            centered = all_pts - mean
+            cov = np.cov(centered.T)
+            eigvals, eigvecs = np.linalg.eigh(cov)
+            v = eigvecs[:, -1]
+            projs = centered @ v
+            min_idx = np.argmin(projs)
+            max_idx = np.argmax(projs)
+
+            p1_pca = mean + projs[min_idx] * v
+            p2_pca = mean + projs[max_idx] * v
+
+            length_px = np.hypot(*(p2_pca - p1_pca))
+            length_m = length_px * self.meters_per_pixel
+            if length_m < 0.5:
+                continue
+
+            mx1 = (p1_pca[0] - bx) * self.meters_per_pixel
+            my1 = (bh - (p1_pca[1] - by)) * self.meters_per_pixel
+            mx2 = (p2_pca[0] - bx) * self.meters_per_pixel
+            my2 = (bh - (p2_pca[1] - by)) * self.meters_per_pixel
+
+            lote_a = lot_id_map.get(lid, f"{lid:02d}")
+            id_divisa = f"DIV-{line_idx:03d}"
+
+            geom_line = LineString([(round(mx1, 3), round(my1, 3)), (round(mx2, 3), round(my2, 3))])
+
+            divisa_records.append({
+                "ID_LINHA": id_divisa,
+                "QUADRA": quadra_code,
+                "BAIRRO": bairro,
+                "TIPO": "TESTADA_FRONTAL",
+                "LOTE_A": lote_a,
+                "LOTE_B": "LOGRADOURO",
+                "COMPR_M": round(length_m, 2),
+                "geometry": geom_line,
+                "cv_pt1": (int(round(p1_pca[0])), int(round(p1_pca[1]))),
+                "cv_pt2": (int(round(p2_pca[0])), int(round(p2_pca[1])))
+            })
+
+            divisa_features_pixel.append({
+                "type": "Feature",
+                "properties": {
+                    "TIPO": "DIVISA",
+                    "ID": id_divisa,
+                    "TIPO_DIVISA": "Testada Frontal (Rua)",
+                    "LOTE_A": lote_a,
+                    "LOTE_B": "LOGRADOURO",
+                    "COMPR_M": round(length_m, 2),
+                    "COLOR": "#ef4444"
+                },
+                "geometry": {
+                    "type": "LineString",
+                    "coordinates": [
+                        [round(float(p1_pca[0]), 1), round(float(h_img - p1_pca[1]), 1)],
+                        [round(float(p2_pca[0]), 1), round(float(h_img - p2_pca[1]), 1)]
+                    ]
+                }
+            })
+            line_idx += 1
 
         if divisa_records:
             gdf_divisas = gpd.GeoDataFrame(divisa_records, crs=f"EPSG:{self.epsg}")
         else:
             gdf_divisas = gpd.GeoDataFrame(
-                columns=["ID_DIVISA", "QUADRA", "BAIRRO", "TIPO", "LOTE_A", "LOTE_B", "COMPR_M", "geometry"],
+                columns=["ID_LINHA", "QUADRA", "BAIRRO", "TIPO", "LOTE_A", "LOTE_B", "COMPR_M", "geometry"],
                 crs=f"EPSG:{self.epsg}"
             )
 
@@ -543,7 +606,7 @@ class QuadraProcessor:
         for i, cnt in enumerate(lot_cnts, start=1):
             p = self.to_metric_polygon(cnt, origin_bbox, buffer_snap=True)
             if p.area >= self.min_lot_area_m2:
-                num_lote = f"{i:02d}"
+                num_lote = lot_id_map.get(i, f"{i:02d}")
                 lot_polys.append((num_lote, p, cnt))
                 lot_records.append({
                     "NUM_LOTE": num_lote,
@@ -553,20 +616,21 @@ class QuadraProcessor:
                     "PERIM_M": round(p.length, 2),
                     "geometry": p
                 })
-                pixel_features.append({
-                    "type": "Feature",
-                    "properties": {
-                        "TIPO": "LOTE",
-                        "ID": num_lote,
-                        "AREA_M2": round(p.area, 2),
-                        "PERIM_M": round(p.length, 2),
-                        "COLOR": "#16a34a"
-                    },
-                    "geometry": {
-                        "type": "Polygon",
-                        "coordinates": [self.to_pixel_polygon(cnt, h_img)]
-                    }
-                })
+                M = cv2.moments(cnt)
+                if M["m00"] > 0:
+                    cx = float(M["m10"] / M["m00"])
+                    cy = float(M["m01"] / M["m00"])
+                    pixel_features.append({
+                        "type": "Feature",
+                        "properties": {
+                            "TIPO": "ROTULO_LOTE",
+                            "ID": num_lote
+                        },
+                        "geometry": {
+                            "type": "Point",
+                            "coordinates": [round(cx, 1), round(float(h_img - cy), 1)]
+                        }
+                    })
 
         # 3. Extrair a geometria de linhas (divisas cadastrais e perímetro)
         gdf_divisas, divisa_features_pixel = self.extract_divisas(
@@ -598,23 +662,9 @@ class QuadraProcessor:
         else:
             gdf_lots = gpd.GeoDataFrame(columns=["NUM_LOTE", "QUADRA", "BAIRRO", "AREA_M2", "PERIM_M", "geometry"], crs=f"EPSG:{self.epsg}")
 
-        # Gerar imagem de preview destacando as divisas em vermelho exatamente como na imagem de referência
+        # Gerar imagem de preview destacando o traçado das divisas em vermelho sobre a planta original (sem preenchimento de polígonos)
         vis = img.copy()
-        cv2.drawContours(vis, [quadra_cnt], -1, (255, 120, 0), 3)
-        
-        np.random.seed(42)
-        overlay = vis.copy()
-        for i, cnt in enumerate(lot_cnts, start=1):
-            color = [int(c) for c in np.random.randint(60, 220, size=3)]
-            cv2.drawContours(overlay, [cnt], -1, color, -1)
-            cv2.drawContours(vis, [cnt], -1, (0, 220, 50), 1)
-            M = cv2.moments(cnt)
-            if M["m00"] > 0:
-                cx = int(M["m10"] / M["m00"])
-                cy = int(M["m01"] / M["m00"])
-                cv2.putText(vis, str(i), (cx-10, cy+6), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 0, 255), 2)
-
-        cv2.addWeighted(overlay, 0.25, vis, 0.75, 0, vis)
+        cv2.drawContours(vis, [quadra_cnt], -1, (255, 120, 0), 2)
 
         # Traçar linhas vermelhas de divisas no preview
         for _, row in gdf_divisas.iterrows():
@@ -622,6 +672,17 @@ class QuadraProcessor:
             pt2 = row.get("cv_pt2")
             if pt1 and pt2:
                 cv2.line(vis, pt1, pt2, (0, 0, 255), 2)
+
+        # Desenhar numeração dos lotes no centroide com badge limpo
+        for i, cnt in enumerate(lot_cnts, start=1):
+            num_str = lot_id_map.get(i, f"{i:02d}")
+            M = cv2.moments(cnt)
+            if M["m00"] > 0:
+                cx = int(M["m10"] / M["m00"])
+                cy = int(M["m01"] / M["m00"])
+                cv2.circle(vis, (cx, cy), 13, (255, 255, 255), -1)
+                cv2.circle(vis, (cx, cy), 13, (0, 0, 200), 1)
+                cv2.putText(vis, num_str, (cx - 8, cy + 5), cv2.FONT_HERSHEY_SIMPLEX, 0.40, (0, 0, 160), 1, cv2.LINE_AA)
 
         area_media_lote = round(sum(l["AREA_M2"] for l in lot_records) / max(1, len(lot_records)), 2)
         extensao_divisas_m = round(float(gdf_divisas["COMPR_M"].sum()), 2) if not gdf_divisas.empty else 0.0
