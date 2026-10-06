@@ -424,79 +424,77 @@ class QuadraProcessor:
             line_idx += 1
 
         # Processar testadas frontais de cada lote (fronteira com logradouro / rua)
+        # Extrai os segmentos exatos do contorno de cada lote que confrontam com o exterior (0),
+        # preservando fielmente chanfros, curvas de concordância e esquinas da quadra.
         for lid in sorted(ext_lids):
-            mask_v = ((orig_r == lid) & (shift_r == 0)) | ((orig_r == 0) & (shift_r == lid))
-            y_v, x_v = np.where(mask_v)
-            pts_v = list(zip(x_v + 0.5, y_v.astype(float)))
-
-            mask_h = ((orig_d == lid) & (shift_d == 0)) | ((orig_d == 0) & (shift_d == lid))
-            y_h, x_h = np.where(mask_h)
-            pts_h = list(zip(x_h.astype(float), y_h + 0.5))
-
-            all_pts = np.array(pts_v + pts_h)
-            if len(all_pts) < 4:
-                continue
-
-            mean = np.mean(all_pts, axis=0)
-            centered = all_pts - mean
-            cov = np.cov(centered.T)
-            eigvals, eigvecs = np.linalg.eigh(cov)
-            v = eigvecs[:, -1]
-            projs = centered @ v
-            min_idx = np.argmin(projs)
-            max_idx = np.argmax(projs)
-
-            p1_pca = mean + projs[min_idx] * v
-            p2_pca = mean + projs[max_idx] * v
-
-            length_px = np.hypot(*(p2_pca - p1_pca))
-            length_m = length_px * self.meters_per_pixel
-            if length_m < 0.5:
-                continue
-
-            mx1 = (p1_pca[0] - bx) * self.meters_per_pixel
-            my1 = (bh - (p1_pca[1] - by)) * self.meters_per_pixel
-            mx2 = (p2_pca[0] - bx) * self.meters_per_pixel
-            my2 = (bh - (p2_pca[1] - by)) * self.meters_per_pixel
-
             lote_a = lot_id_map.get(lid, f"{lid:02d}")
-            id_divisa = f"DIV-{line_idx:03d}"
+            mask_lote = (full_partition == lid).astype(np.uint8) * 255
+            cnts_lote, _ = cv2.findContours(mask_lote, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            if not cnts_lote:
+                continue
+            c_lote = max(cnts_lote, key=cv2.contourArea)
+            approx_lote = cv2.approxPolyDP(c_lote, 2.0, True)
+            pts_lote = [p[0] for p in approx_lote]
+            n_lote_pts = len(pts_lote)
 
-            geom_line = LineString([(round(mx1, 3), round(my1, 3)), (round(mx2, 3), round(my2, 3))])
+            for k in range(n_lote_pts):
+                p1 = pts_lote[k]
+                p2 = pts_lote[(k + 1) % n_lote_pts]
 
-            divisa_records.append({
-                "ID_LINHA": id_divisa,
-                "QUADRA": quadra_code,
-                "BAIRRO": bairro,
-                "TIPO": "TESTADA_FRONTAL",
-                "LOTE_A": lote_a,
-                "LOTE_B": "LOGRADOURO",
-                "COMPR_M": round(length_m, 2),
-                "geometry": geom_line,
-                "cv_pt1": (int(round(p1_pca[0])), int(round(p1_pca[1]))),
-                "cv_pt2": (int(round(p2_pca[0])), int(round(p2_pca[1])))
-            })
+                # Amostrar vizinhança do ponto médio do segmento para confirmar fronteira com exterior (0)
+                mx = int(round((p1[0] + p2[0]) / 2.0))
+                my = int(round((p1[1] + p2[1]) / 2.0))
+                y0, y1 = max(0, my - 2), min(full_partition.shape[0], my + 3)
+                x0, x1 = max(0, mx - 2), min(full_partition.shape[1], mx + 3)
+                patch = full_partition[y0:y1, x0:x1]
 
-            divisa_features_pixel.append({
-                "type": "Feature",
-                "properties": {
-                    "TIPO": "DIVISA",
-                    "ID": id_divisa,
-                    "TIPO_DIVISA": "Testada Frontal (Rua)",
-                    "LOTE_A": lote_a,
-                    "LOTE_B": "LOGRADOURO",
-                    "COMPR_M": round(length_m, 2),
-                    "COLOR": "#ef4444"
-                },
-                "geometry": {
-                    "type": "LineString",
-                    "coordinates": [
-                        [round(float(p1_pca[0]), 1), round(float(h_img - p1_pca[1]), 1)],
-                        [round(float(p2_pca[0]), 1), round(float(h_img - p2_pca[1]), 1)]
-                    ]
-                }
-            })
-            line_idx += 1
+                if np.any(patch == 0):
+                    length_px = np.hypot(p2[0] - p1[0], p2[1] - p1[1])
+                    length_m = length_px * self.meters_per_pixel
+                    if length_m < 0.5:
+                        continue
+
+                    mx1 = (p1[0] - bx) * self.meters_per_pixel
+                    my1 = (bh - (p1[1] - by)) * self.meters_per_pixel
+                    mx2 = (p2[0] - bx) * self.meters_per_pixel
+                    my2 = (bh - (p2[1] - by)) * self.meters_per_pixel
+
+                    id_divisa = f"DIV-{line_idx:03d}"
+                    geom_line = LineString([(round(mx1, 3), round(my1, 3)), (round(mx2, 3), round(my2, 3))])
+
+                    divisa_records.append({
+                        "ID_LINHA": id_divisa,
+                        "QUADRA": quadra_code,
+                        "BAIRRO": bairro,
+                        "TIPO": "TESTADA_FRONTAL",
+                        "LOTE_A": lote_a,
+                        "LOTE_B": "LOGRADOURO",
+                        "COMPR_M": round(length_m, 2),
+                        "geometry": geom_line,
+                        "cv_pt1": (int(p1[0]), int(p1[1])),
+                        "cv_pt2": (int(p2[0]), int(p2[1]))
+                    })
+
+                    divisa_features_pixel.append({
+                        "type": "Feature",
+                        "properties": {
+                            "TIPO": "DIVISA",
+                            "ID": id_divisa,
+                            "TIPO_DIVISA": "Testada Frontal (Rua)",
+                            "LOTE_A": lote_a,
+                            "LOTE_B": "LOGRADOURO",
+                            "COMPR_M": round(length_m, 2),
+                            "COLOR": "#ef4444"
+                        },
+                        "geometry": {
+                            "type": "LineString",
+                            "coordinates": [
+                                [round(float(p1[0]), 1), round(float(h_img - p1[1]), 1)],
+                                [round(float(p2[0]), 1), round(float(h_img - p2[1]), 1)]
+                            ]
+                        }
+                    })
+                    line_idx += 1
 
         if divisa_records:
             gdf_divisas = gpd.GeoDataFrame(divisa_records, crs=f"EPSG:{self.epsg}")
