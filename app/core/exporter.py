@@ -3,6 +3,7 @@ import shutil
 import zipfile
 import tempfile
 import geopandas as gpd
+from shapely.geometry import LineString, Polygon
 from osgeo import ogr, osr
 
 
@@ -27,8 +28,28 @@ class VectorExporter:
         # Limpar colunas auxiliares de processamento de imagem antes de exportar para GIS
         clean_divisas = None
         if has_divisas:
-            cols_to_drop = [c for c in ["cv_pt1", "cv_pt2"] if c in gdf_divisas.columns]
+            cols_to_drop = [c for c in ["cv_pt1", "cv_pt2", "cv_pts"] if c in gdf_divisas.columns]
             clean_divisas = gdf_divisas.drop(columns=cols_to_drop)
+
+        # Gerar camada de perímetros fechados dos lotes (LineString com >= 4 vértices)
+        # Compatibilidade 100% com ferramenta 'Linhas para polígonos' (qgis:linestopolygons)
+        gdf_perimetros = None
+        if not gdf_lots.empty:
+            perim_records = []
+            for _, row in gdf_lots.iterrows():
+                poly = row.geometry
+                if poly.geom_type == 'Polygon':
+                    ring = LineString(poly.exterior.coords)
+                    perim_records.append({
+                        "NUM_LOTE": row.get("NUM_LOTE", ""),
+                        "QUADRA": row.get("QUADRA", ""),
+                        "BAIRRO": row.get("BAIRRO", ""),
+                        "PERIM_M": round(ring.length, 2),
+                        "NUM_VERT": len(ring.coords),
+                        "geometry": ring
+                    })
+            if perim_records:
+                gdf_perimetros = gpd.GeoDataFrame(perim_records, crs=gdf_lots.crs)
 
         # 1. GeoPackage (.gpkg)
         gpkg_path = os.path.join(output_dir, f"{base_name}.gpkg")
@@ -37,6 +58,8 @@ class VectorExporter:
         gdf_quadra.to_file(gpkg_path, layer="quadra", driver="GPKG")
         if clean_divisas is not None and not clean_divisas.empty:
             clean_divisas.to_file(gpkg_path, layer="tracado_lotes", driver="GPKG")
+        if gdf_perimetros is not None and not gdf_perimetros.empty:
+            gdf_perimetros.to_file(gpkg_path, layer="perimetros_lotes", driver="GPKG")
         if not gdf_lots.empty:
             gdf_lots.to_file(gpkg_path, layer="lotes_poligonos", driver="GPKG")
         if has_edif:
@@ -54,6 +77,11 @@ class VectorExporter:
             for _, row in clean_divisas.iterrows():
                 d = row.to_dict()
                 d["TIPO_CAMADA"] = "TRACADO_LOTES"
+                features.append(d)
+        if gdf_perimetros is not None and not gdf_perimetros.empty:
+            for _, row in gdf_perimetros.iterrows():
+                d = row.to_dict()
+                d["TIPO_CAMADA"] = "PERIMETROS_LOTES"
                 features.append(d)
         if not gdf_lots.empty:
             for _, row in gdf_lots.iterrows():
@@ -77,6 +105,9 @@ class VectorExporter:
             if clean_divisas is not None and not clean_divisas.empty:
                 shp_tracado = os.path.join(temp_shp_dir, "tracado_lotes.shp")
                 clean_divisas.to_file(shp_tracado)
+            if gdf_perimetros is not None and not gdf_perimetros.empty:
+                shp_p = os.path.join(temp_shp_dir, "perimetros_lotes.shp")
+                gdf_perimetros.to_file(shp_p)
             if not gdf_lots.empty:
                 shp_l = os.path.join(temp_shp_dir, "lotes_poligonos.shp")
                 gdf_lots.to_file(shp_l)
