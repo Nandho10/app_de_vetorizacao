@@ -13,7 +13,7 @@ class VectorExporter:
     """
 
     @staticmethod
-    def export_all(gdf_quadra, gdf_lots, output_dir, base_name="quadra_vetorizada", crs_epsg=None, gdf_edificacoes=None):
+    def export_all(gdf_quadra, gdf_lots, output_dir, base_name="quadra_vetorizada", crs_epsg=None, gdf_edificacoes=None, gdf_divisas=None):
         """
         Gera todos os formatos e retorna um dicionário com os caminhos dos arquivos gerados.
         """
@@ -21,6 +21,7 @@ class VectorExporter:
         results = {}
 
         has_edif = gdf_edificacoes is not None and not gdf_edificacoes.empty
+        has_divisas = gdf_divisas is not None and not gdf_divisas.empty
 
         # 1. GeoPackage (.gpkg)
         gpkg_path = os.path.join(output_dir, f"{base_name}.gpkg")
@@ -29,6 +30,8 @@ class VectorExporter:
         gdf_quadra.to_file(gpkg_path, layer="quadra", driver="GPKG")
         if not gdf_lots.empty:
             gdf_lots.to_file(gpkg_path, layer="lotes", driver="GPKG")
+        if has_divisas:
+            gdf_divisas.to_file(gpkg_path, layer="divisas", driver="GPKG")
         if has_edif:
             gdf_edificacoes.to_file(gpkg_path, layer="edificacoes", driver="GPKG")
         results["gpkg"] = gpkg_path
@@ -44,6 +47,11 @@ class VectorExporter:
             for _, row in gdf_lots.iterrows():
                 d = row.to_dict()
                 d["TIPO_CAMADA"] = "LOTE"
+                features.append(d)
+        if has_divisas:
+            for _, row in gdf_divisas.iterrows():
+                d = row.to_dict()
+                d["TIPO_CAMADA"] = "DIVISA"
                 features.append(d)
         if has_edif:
             for _, row in gdf_edificacoes.iterrows():
@@ -62,6 +70,9 @@ class VectorExporter:
             if not gdf_lots.empty:
                 shp_l = os.path.join(temp_shp_dir, "lotes.shp")
                 gdf_lots.to_file(shp_l)
+            if has_divisas:
+                shp_d = os.path.join(temp_shp_dir, "divisas.shp")
+                gdf_divisas.to_file(shp_d)
             if has_edif:
                 shp_e = os.path.join(temp_shp_dir, "edificacoes.shp")
                 gdf_edificacoes.to_file(shp_e)
@@ -83,6 +94,7 @@ class VectorExporter:
                 # Styles
                 f.write('  <Style id="quadraStyle"><LineStyle><color>ff0000ff</color><width>3</width></LineStyle><PolyStyle><fill>0</fill></PolyStyle></Style>\n')
                 f.write('  <Style id="loteStyle"><LineStyle><color>ff00aa00</color><width>1.5</width></LineStyle><PolyStyle><color>4000ff00</color></PolyStyle></Style>\n')
+                f.write('  <Style id="divisaStyle"><LineStyle><color>ff0000ff</color><width>2.5</width></LineStyle></Style>\n')
                 f.write('  <Style id="edifExistenteStyle"><LineStyle><color>ff00bfff</color><width>2</width></LineStyle><PolyStyle><color>8000ffff</color></PolyStyle></Style>\n')
                 f.write('  <Style id="edifDemolidaStyle"><LineStyle><color>ff0000ff</color><width>2</width></LineStyle><PolyStyle><color>600000ff</color></PolyStyle></Style>\n')
 
@@ -107,6 +119,28 @@ class VectorExporter:
                             f.write(f'      {lon:.7f},{lat:.7f},0\n')
                     f.write('    </coordinates></LinearRing></outerBoundaryIs></Polygon>\n')
                     f.write('  </Placemark>\n')
+
+                # Divisas (Linhas Vermelhas) Placemarks
+                if has_divisas:
+                    for _, row in gdf_divisas.iterrows():
+                        line = row.geometry
+                        if line.geom_type == 'LineString':
+                            id_div = row.get("ID_DIVISA", "")
+                            tipo = row.get("TIPO", "")
+                            lote_a = row.get("LOTE_A", "")
+                            lote_b = row.get("LOTE_B", "")
+                            compr = row.get("COMPR_M", "")
+                            f.write('  <Placemark>\n')
+                            f.write(f'    <name>{id_div} ({tipo})</name>\n')
+                            f.write(f'    <description>Tipo: {tipo} | Entre: Lote {lote_a} e Lote {lote_b} | Extensão: {compr} m</description>\n')
+                            f.write('    <styleUrl>#divisaStyle</styleUrl>\n')
+                            f.write('    <LineString><coordinates>\n')
+                            for x, y in line.coords:
+                                lon = ref_lon + x * m_to_lon
+                                lat = ref_lat + y * m_to_lat
+                                f.write(f'      {lon:.7f},{lat:.7f},0\n')
+                            f.write('    </coordinates></LineString>\n')
+                            f.write('  </Placemark>\n')
 
                 # Lotes Placemarks
                 if not gdf_lots.empty:

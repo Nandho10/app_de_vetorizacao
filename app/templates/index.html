@@ -220,6 +220,14 @@
             <span class="text-[10px] text-slate-400 uppercase tracking-wider block">Área Média / Lote</span>
             <span id="statAreaMediaLote" class="text-xs font-semibold text-emerald-300">-</span>
           </div>
+          <div class="bg-slate-900/80 p-2 rounded-lg border border-slate-700/40">
+            <span class="text-[10px] text-red-400 uppercase tracking-wider block font-semibold">Divisas (Linhas)</span>
+            <span id="statTotalDivisas" class="text-xs font-bold text-red-400">-</span>
+          </div>
+          <div class="bg-slate-900/80 p-2 rounded-lg border border-slate-700/40">
+            <span class="text-[10px] text-red-400 uppercase tracking-wider block font-semibold">Extensão Divisas</span>
+            <span id="statExtensaoDivisas" class="text-xs font-bold text-red-300">-</span>
+          </div>
         </div>
 
         <!-- Downloads -->
@@ -279,6 +287,10 @@
           <label class="flex items-center space-x-1 cursor-pointer">
             <input type="checkbox" id="chkLots" checked onchange="toggleLotsLayer()" class="accent-emerald-500">
             <span>Lotes</span>
+          </label>
+          <label class="flex items-center space-x-1 cursor-pointer">
+            <input type="checkbox" id="chkDivisas" checked onchange="toggleDivisasLayer()" class="accent-red-500">
+            <span class="text-red-400 font-semibold">Divisas (Linhas)</span>
           </label>
           <div class="flex items-center space-x-1 pl-1 border-l border-slate-700/60">
             <span class="text-[10px] text-slate-400">Opac:</span>
@@ -353,6 +365,7 @@
     let rasterOverlay = null;
     let quadraLayer = null;
     let lotsLayer = null;
+    let divisasLayer = null;
     let labelMarkers = [];
     let currentImageDimensions = [1000, 1000];
 
@@ -543,6 +556,12 @@
       document.getElementById('statTotalLots').innerText = data.stats.total_lots;
       document.getElementById('statPerimQuadra').innerText = Number(data.stats.quadra_perim_m).toLocaleString('pt-BR') + ' m';
       document.getElementById('statAreaMediaLote').innerText = Number(data.stats.area_media_lote_m2 || 0).toLocaleString('pt-BR') + ' m²';
+      if (document.getElementById('statTotalDivisas')) {
+        document.getElementById('statTotalDivisas').innerText = data.stats.total_divisas || 0;
+      }
+      if (document.getElementById('statExtensaoDivisas')) {
+        document.getElementById('statExtensaoDivisas').innerText = Number(data.stats.extensao_divisas_m || 0).toLocaleString('pt-BR') + ' m';
+      }
       document.getElementById('tabCount').innerText = data.stats.total_lots;
 
       // Dimensões da imagem original
@@ -554,6 +573,7 @@
       if (rasterOverlay) map.removeLayer(rasterOverlay);
       if (quadraLayer) map.removeLayer(quadraLayer);
       if (lotsLayer) map.removeLayer(lotsLayer);
+      if (divisasLayer) map.removeLayer(divisasLayer);
       labelMarkers.forEach(m => map.removeLayer(m));
       labelMarkers = [];
 
@@ -563,6 +583,7 @@
       // 2. Separar feições vetoriais
       const quadraFeatures = data.geojson_pixel.features.filter(f => f.properties.TIPO === 'QUADRA');
       const lotsFeatures = data.geojson_pixel.features.filter(f => f.properties.TIPO === 'LOTE');
+      const divisaFeatures = data.geojson_pixel.features.filter(f => f.properties.TIPO === 'DIVISA');
 
       // Quadra Layer
       quadraLayer = L.geoJSON({type: 'FeatureCollection', features: quadraFeatures}, {
@@ -574,7 +595,7 @@
         }
       }).addTo(map);
 
-      // Lotes Layer
+      // Lotes Layer (Zero Gap)
       lotsLayer = L.geoJSON({type: 'FeatureCollection', features: lotsFeatures}, {
         coordsToLatLng: function(coords) { return [coords[1], coords[0]]; },
         style: function(feature) {
@@ -611,6 +632,31 @@
           });
           labelMarkers.push(marker);
           marker.addTo(map);
+        }
+      }).addTo(map);
+
+      // 3. Divisas Layer (Linhas Vermelhas)
+      divisasLayer = L.geoJSON({type: 'FeatureCollection', features: divisaFeatures}, {
+        coordsToLatLng: function(coords) { return [coords[1], coords[0]]; },
+        style: function(feature) {
+          return {
+            color: '#ef4444',
+            weight: 2.5,
+            opacity: 0.95
+          };
+        },
+        onEachFeature: function(feature, layer) {
+          const props = feature.properties;
+          layer.bindTooltip(`<b>${props.ID} (${props.TIPO_DIVISA})</b><br>Entre: Lote ${props.LOTE_A} e Lote ${props.LOTE_B}<br>Extensão: ${props.COMPR_M} m`, {
+            sticky: true,
+            className: 'lot-tooltip'
+          });
+          layer.on('mouseover', function() {
+            this.setStyle({weight: 4.5, color: '#ff0000'});
+          });
+          layer.on('mouseout', function() {
+            divisasLayer.resetStyle(this);
+          });
         }
       }).addTo(map);
 
@@ -730,6 +776,14 @@
       } else {
         map.removeLayer(lotsLayer);
         labelMarkers.forEach(m => map.removeLayer(m));
+      }
+    }
+    function toggleDivisasLayer() {
+      if (!divisasLayer) return;
+      if (document.getElementById('chkDivisas').checked) {
+        map.addLayer(divisasLayer);
+      } else {
+        map.removeLayer(divisasLayer);
       }
     }
     function changeOpacity(val) {

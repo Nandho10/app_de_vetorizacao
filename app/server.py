@@ -137,7 +137,7 @@ def process():
             epsg=epsg
         )
 
-        gdf_quadra, gdf_lots, vis_img, orig_img, stats, geojson_pixel = processor.process(
+        gdf_quadra, gdf_lots, gdf_divisas, vis_img, orig_img, stats, geojson_pixel = processor.process(
             file_path=file_path,
             quadra_code=quadra_code,
             bairro=bairro,
@@ -157,14 +157,15 @@ def process():
         cv2.imwrite(orig_path, orig_img, [cv2.IMWRITE_JPEG_QUALITY, 90])
         cv2.imwrite(prev_path, vis_img, [cv2.IMWRITE_JPEG_QUALITY, 90])
 
-        # Exportar todos os formatos vetoriais (quadra e lotes)
+        # Exportar todos os formatos vetoriais (quadra, lotes e divisas em linhas)
         task_out_dir = os.path.join(OUTPUT_DIR, task_id)
         exported_files = VectorExporter.export_all(
             gdf_quadra=gdf_quadra,
             gdf_lots=gdf_lots,
             output_dir=task_out_dir,
             base_name=f"{quadra_code}_vetorizado",
-            crs_epsg=epsg
+            crs_epsg=epsg,
+            gdf_divisas=gdf_divisas
         )
 
         # Preparar dados tabulares dos lotes
