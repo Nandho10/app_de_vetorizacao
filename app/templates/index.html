@@ -209,24 +209,16 @@
             <span id="statAreaQuadra" class="text-base font-bold text-white">-</span>
           </div>
           <div class="bg-slate-900/80 p-2.5 rounded-lg border border-slate-700/40">
-            <span class="text-[10px] text-slate-400 uppercase tracking-wider block">Lotes Detectados</span>
-            <span id="statTotalLots" class="text-base font-bold text-emerald-400">-</span>
-          </div>
-          <div class="bg-slate-900/80 p-2.5 rounded-lg border border-slate-700/40">
             <span class="text-[10px] text-slate-400 uppercase tracking-wider block">Perímetro Quadra</span>
-            <span id="statPerimQuadra" class="text-xs font-semibold text-slate-200">-</span>
-          </div>
-          <div class="bg-slate-900/80 p-2.5 rounded-lg border border-slate-700/40">
-            <span class="text-[10px] text-slate-400 uppercase tracking-wider block">Área Média / Lote</span>
-            <span id="statAreaMediaLote" class="text-xs font-semibold text-emerald-300">-</span>
+            <span id="statPerimQuadra" class="text-base font-bold text-sky-400">-</span>
           </div>
           <div class="bg-slate-900/80 p-2 rounded-lg border border-slate-700/40">
-            <span class="text-[10px] text-red-400 uppercase tracking-wider block font-semibold">Divisas (Linhas)</span>
-            <span id="statTotalDivisas" class="text-xs font-bold text-red-400">-</span>
+            <span class="text-[10px] text-red-400 uppercase tracking-wider block font-semibold">Total de Linhas</span>
+            <span id="statTotalDivisas" class="text-sm font-bold text-red-400">-</span>
           </div>
           <div class="bg-slate-900/80 p-2 rounded-lg border border-slate-700/40">
-            <span class="text-[10px] text-red-400 uppercase tracking-wider block font-semibold">Extensão Divisas</span>
-            <span id="statExtensaoDivisas" class="text-xs font-bold text-red-300">-</span>
+            <span class="text-[10px] text-red-400 uppercase tracking-wider block font-semibold">Extensão Traçado</span>
+            <span id="statExtensaoDivisas" class="text-sm font-bold text-red-300">-</span>
           </div>
         </div>
 
@@ -278,19 +270,11 @@
         <div id="layerToggles" class="flex items-center space-x-3 text-slate-300 text-[11px]">
           <label class="flex items-center space-x-1 cursor-pointer">
             <input type="checkbox" id="chkRaster" checked onchange="toggleRasterLayer()" class="accent-emerald-500">
-            <span>Prancha</span>
-          </label>
-          <label class="flex items-center space-x-1 cursor-pointer">
-            <input type="checkbox" id="chkQuadra" checked onchange="toggleQuadraLayer()" class="accent-sky-500">
-            <span>Quadra</span>
+            <span>Prancha Original</span>
           </label>
           <label class="flex items-center space-x-1 cursor-pointer">
             <input type="checkbox" id="chkDivisas" checked onchange="toggleDivisasLayer()" class="accent-red-500">
-            <span class="text-red-400 font-bold">Traçado dos Lotes (Linhas)</span>
-          </label>
-          <label class="flex items-center space-x-1 cursor-pointer">
-            <input type="checkbox" id="chkLabels" checked onchange="toggleLabelsLayer()" class="accent-amber-500">
-            <span>Numeração dos Lotes</span>
+            <span class="text-red-400 font-bold">Traçado Vetorial (Linhas)</span>
           </label>
         </div>
       </div>
@@ -325,41 +309,13 @@
                 <thead class="bg-slate-800/90 text-slate-400 font-semibold border-b border-slate-700/50 sticky top-0">
                   <tr>
                     <th class="px-4 py-2.5">ID Linha</th>
-                    <th class="px-4 py-2.5">Tipo de Divisa</th>
-                    <th class="px-4 py-2.5">Lote A</th>
-                    <th class="px-4 py-2.5">Confrontante</th>
+                    <th class="px-4 py-2.5">Tipo de Traçado</th>
                     <th class="px-4 py-2.5">Extensão (m)</th>
                     <th class="px-4 py-2.5 text-center">Localizar</th>
                   </tr>
                 </thead>
                 <tbody id="divisasTableBody" class="divide-y divide-slate-800/60 font-mono">
                   <!-- Linhas injetadas dinamicamente -->
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <!-- Tabela Resumo dos Lotes -->
-          <div class="border-t border-slate-800/80 pt-4">
-            <div class="px-4 py-2.5 border-b border-slate-800 flex justify-between items-center bg-slate-800/20 rounded-t-lg">
-              <h4 class="text-xs font-semibold text-slate-300 flex items-center gap-2">
-                <i class="fa-solid fa-shapes text-emerald-400"></i>
-                Relação de Lotes Detectados
-              </h4>
-              <span id="lotsSummary" class="text-xs text-slate-400">Total: 0 lotes</span>
-            </div>
-            <div class="overflow-x-auto max-h-[240px] border border-slate-800/60 rounded-b-lg">
-              <table class="w-full text-left text-xs text-slate-300">
-                <thead class="bg-slate-800/90 text-slate-400 font-semibold border-b border-slate-700/50 sticky top-0">
-                  <tr>
-                    <th class="px-4 py-2">Lote #</th>
-                    <th class="px-4 py-2">Área (m²)</th>
-                    <th class="px-4 py-2">Perímetro (m)</th>
-                    <th class="px-4 py-2 text-center">Localizar</th>
-                  </tr>
-                </thead>
-                <tbody id="lotsTableBody" class="divide-y divide-slate-800/60 font-mono">
-                  <!-- Lotes injetados dinamicamente -->
                 </tbody>
               </table>
             </div>
@@ -610,40 +566,29 @@
       // 1. Overlay da prancha original
       rasterOverlay = L.imageOverlay(data.orig_url, bounds).addTo(map);
 
-      // 2. Separar feições vetoriais
-      const quadraFeatures = data.geojson_pixel.features.filter(f => f.properties.TIPO === 'QUADRA');
+      // 2. Feições vetoriais de linhas
       const divisaFeatures = data.geojson_pixel.features.filter(f => f.properties.TIPO === 'DIVISA');
-      const rotuloFeatures = data.geojson_pixel.features.filter(f => f.properties.TIPO === 'ROTULO_LOTE');
 
-      // Quadra Layer
-      quadraLayer = L.geoJSON({type: 'FeatureCollection', features: quadraFeatures}, {
-        coordsToLatLng: function(coords) { return [coords[1], coords[0]]; },
-        style: {
-          color: '#0284c7',
-          weight: 4,
-          fillOpacity: 0
-        }
-      }).addTo(map);
-
-      // 3. Divisas Layer (Traçado dos Lotes em Linhas Vermelhas)
+      // 3. Camada do Traçado das Linhas (Zero Gap, Zero duplicatas)
       divisasLayer = L.geoJSON({type: 'FeatureCollection', features: divisaFeatures}, {
         coordsToLatLng: function(coords) { return [coords[1], coords[0]]; },
         style: function(feature) {
+          const isPerim = feature.properties.ID === 'LIN-001';
           return {
-            color: '#ef4444',
-            weight: 2.5,
+            color: isPerim ? '#0284c7' : '#ef4444',
+            weight: isPerim ? 3.5 : 2.5,
             opacity: 0.95
           };
         },
         onEachFeature: function(feature, layer) {
           const props = feature.properties;
           divisaLayersMap[props.ID] = layer;
-          layer.bindTooltip(`<b>${props.ID} (${props.TIPO_DIVISA})</b><br>Entre: Lote ${props.LOTE_A} e ${props.LOTE_B}<br>Extensão: ${props.COMPR_M} m`, {
+          layer.bindTooltip(`<b>${props.ID} (${props.TIPO_DIVISA})</b><br>Extensão: ${props.COMPR_M} m`, {
             sticky: true,
             className: 'lot-tooltip'
           });
           layer.on('mouseover', function() {
-            this.setStyle({weight: 4.5, color: '#ff0000'});
+            this.setStyle({weight: 5, color: '#fbbf24'});
           });
           layer.on('mouseout', function() {
             divisasLayer.resetStyle(this);
@@ -651,40 +596,23 @@
         }
       }).addTo(map);
 
-      // 4. Rótulos Numéricos dos Lotes no Centroide
-      rotuloFeatures.forEach(f => {
-        const coords = f.geometry.coordinates; // [px, h_img - py]
-        const latLng = [coords[1], coords[0]];
-        const marker = L.marker(latLng, {
-          lotId: f.properties.ID,
-          icon: L.divIcon({
-            className: 'lot-label',
-            html: f.properties.ID,
-            iconSize: [24, 18],
-            iconAnchor: [12, 9]
-          })
-        });
-        labelMarkers.push(marker);
-        marker.addTo(map);
-      });
-
       // Ajustar visualização do mapa para a quadra
-      map.fitBounds(quadraLayer.getBounds(), {padding: [40, 40]});
+      map.fitBounds(divisasLayer.getBounds(), {padding: [40, 40]});
 
-      // 5. Preencher Tabela de Linhas do Traçado
+      // 4. Preencher Tabela de Linhas do Traçado
       const tbodyDivisas = document.getElementById('divisasTableBody');
       tbodyDivisas.innerHTML = '';
       if (data.divisas && data.divisas.length > 0) {
         data.divisas.forEach(d => {
           let badgeTipo = '';
-          if (d.tipo === 'DIVISA_LATERAL') {
-            badgeTipo = '<span class="text-sky-400 bg-sky-950/70 border border-sky-800/60 px-2 py-0.5 rounded text-[10px]">Divisa Lateral</span>';
-          } else if (d.tipo === 'DIVISA_FUNDOS') {
-            badgeTipo = '<span class="text-indigo-400 bg-indigo-950/70 border border-indigo-800/60 px-2 py-0.5 rounded text-[10px]">Divisa de Fundos</span>';
-          } else if (d.tipo === 'TESTADA_FRONTAL') {
-            badgeTipo = '<span class="text-emerald-400 bg-emerald-950/70 border border-emerald-800/60 px-2 py-0.5 rounded text-[10px]">Testada Frontal (Rua)</span>';
+          if (d.tipo === 'PERIMETRO') {
+            badgeTipo = '<span class="text-sky-400 bg-sky-950/70 border border-sky-800/60 px-2 py-0.5 rounded text-[10px]">Perímetro da Quadra</span>';
+          } else if (d.tipo === 'DIVISA_ESPINHA') {
+            badgeTipo = '<span class="text-amber-400 bg-amber-950/70 border border-amber-800/60 px-2 py-0.5 rounded text-[10px]">Espinha Central</span>';
+          } else if (d.tipo === 'DIVISA_VERTICAL') {
+            badgeTipo = '<span class="text-indigo-400 bg-indigo-950/70 border border-indigo-800/60 px-2 py-0.5 rounded text-[10px]">Divisa Lateral</span>';
           } else {
-            badgeTipo = `<span class="text-slate-300">${d.tipo}</span>`;
+            badgeTipo = `<span class="text-emerald-400 bg-emerald-950/70 border border-emerald-800/60 px-2 py-0.5 rounded text-[10px]">${d.tipo}</span>`;
           }
 
           const tr = document.createElement('tr');
@@ -692,8 +620,6 @@
           tr.innerHTML = `
             <td class="px-4 py-2 font-bold text-red-400">${d.id_linha}</td>
             <td class="px-4 py-2">${badgeTipo}</td>
-            <td class="px-4 py-2 text-slate-100 font-bold">Lote ${d.lote_a}</td>
-            <td class="px-4 py-2 text-slate-300">${d.lote_b === 'LOGRADOURO' ? '<span class="text-amber-400 font-semibold">Logradouro / Rua</span>' : 'Lote ' + d.lote_b}</td>
             <td class="px-4 py-2 text-emerald-300 font-mono">${Number(d.compr_m).toFixed(2)} m</td>
             <td class="px-4 py-2 text-center">
               <button onclick="highlightLine('${d.id_linha}')" class="text-xs bg-slate-800 hover:bg-slate-700 text-sky-400 px-2.5 py-1 rounded border border-slate-700 transition flex items-center gap-1 mx-auto">
@@ -704,31 +630,6 @@
           tbodyDivisas.appendChild(tr);
         });
         document.getElementById('tableSummary').innerText = `Total: ${data.divisas.length} linhas de traçado`;
-      }
-
-      // 6. Preencher Tabela Resumo dos Lotes
-      const tbodyLots = document.getElementById('lotsTableBody');
-      tbodyLots.innerHTML = '';
-      if (data.lots && data.lots.length > 0) {
-        data.lots.forEach(lot => {
-          const tr = document.createElement('tr');
-          tr.className = 'hover:bg-slate-800/50 transition';
-          tr.innerHTML = `
-            <td class="px-4 py-2 font-bold text-emerald-400 flex items-center gap-1.5">
-              <span class="text-slate-400 text-xs font-normal">Lote</span>
-              <input type="text" value="${lot.num_lote}" onchange="updateLotId('${lot.num_lote}', this.value)" class="w-14 bg-slate-900 border border-slate-700 focus:border-emerald-500 rounded px-1.5 py-0.5 text-emerald-300 font-bold text-center text-xs">
-            </td>
-            <td class="px-4 py-2 font-mono text-slate-200">${Number(lot.area_m2).toLocaleString('pt-BR')} m²</td>
-            <td class="px-4 py-2 font-mono text-slate-400">${Number(lot.perim_m).toLocaleString('pt-BR')} m</td>
-            <td class="px-4 py-2 text-center">
-              <button onclick="highlightLot('${lot.num_lote}')" class="text-xs bg-slate-800 hover:bg-slate-700 text-emerald-400 px-2.5 py-1 rounded border border-slate-700 transition flex items-center gap-1 mx-auto">
-                <i class="fa-solid fa-magnifying-glass"></i> Ver Lote
-              </button>
-            </td>
-          `;
-          tbodyLots.appendChild(tr);
-        });
-        document.getElementById('lotsSummary').innerText = `Total: ${data.lots.length} lotes detectados`;
       }
 
       // Atualizar imagem OpenCV

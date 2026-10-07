@@ -5,7 +5,7 @@ import tempfile
 import zipfile
 from PIL import Image
 from shapely.geometry import Polygon, MultiPolygon, Point, LineString, MultiLineString
-from shapely.ops import polygonize, unary_union
+from shapely.ops import polygonize, unary_union, nearest_points
 import geopandas as gpd
 import scipy.ndimage as ndi
 
@@ -134,7 +134,47 @@ class QuadraProcessor:
 
         arc = cv2.arcLength(best_cnt, True)
         approx = cv2.approxPolyDP(best_cnt, 0.002 * arc, True)
+        approx = self.clean_contour_spurs(approx)
         return approx
+
+    @staticmethod
+    def clean_contour_spurs(cnt, max_base_dist=35, min_height=15):
+        """
+        Remove espigões/esporos agudos (como setas P.R., ponteiros de cota)
+        que saem do perímetro e retornam quase ao mesmo ponto.
+        """
+        pts = cnt.reshape(-1, 2)
+        n = len(pts)
+        if n < 6:
+            return cnt
+        cleaned = []
+        i = 0
+        while i < n:
+            p_curr = pts[i]
+            removed_spike = False
+            for jump in [2, 3]:
+                next_idx = (i + jump) % n
+                p_next = pts[next_idx]
+                base_dist = float(np.hypot(*(p_next - p_curr)))
+                if base_dist <= max_base_dist:
+                    for mid_offset in range(1, jump):
+                        p_mid = pts[(i + mid_offset) % n]
+                        line_vec = p_next - p_curr
+                        if base_dist > 0:
+                            dist_to_line = abs(float(np.cross(line_vec, p_curr - p_mid))) / base_dist
+                        else:
+                            dist_to_line = float(np.hypot(*(p_mid - p_curr)))
+                        if dist_to_line >= min_height:
+                            cleaned.append(p_curr)
+                            i = next_idx
+                            removed_spike = True
+                            break
+                if removed_spike:
+                    break
+            if not removed_spike:
+                cleaned.append(p_curr)
+                i += 1
+        return np.array(cleaned, dtype=np.int32).reshape((-1, 1, 2))
 
     def get_building_suppression_mask(self, img, quadra_cnt):
         """
@@ -308,75 +348,257 @@ class QuadraProcessor:
 
         return lot_cnts, full_partition, lot_id_map
 
-    def extract_divisas(self, lot_polys, origin_bbox, quadra_code, bairro, h_img):
+    @staticmethod
+    def merge_collinear_lines(lines_metric, max_angle_diff=6.0, max_dist=1.20):
         """
-        Extrai a geometria de linhas (LineString) do traçado completo dos lotes
-        utilizando noding topológico das fronteiras de cada lote (unary_union).
-        
-        Garante:
-        1. Topologia limpa (Zero Gap): cada segmento compartilha vértices exatos (X, Y) com as linhas adjacentes.
-        2. Compatibilidade 100% com QGIS:
-           - Ferramenta 'Poligonizar' (native:polygonize) fecha perfeitamente todos os polígonos sem falhas.
-           - Ferramenta 'Linhas para polígonos' (qgis:linestopolygons).
-        3. Preservação fiel de chanfros, curvas de concordância e testadas de esquinas.
-        4. Relações cadastrais completas (LOTE_A, LOTE_B, DIVISA_LATERAL, DIVISA_FUNDOS, TESTADA_FRONTAL).
+        Agrupa e unifica segmentos colineares contíguos (ex: espinha central,
+        divisores de fundo de lote) gerando retas contínuas perfeitas de CAD.
+        """
+        if not lines_metric:
+            return []
+
+        segments = []
+        for l in lines_metric:
+            coords = np.array(l.coords)
+            p1 = coords[0]
+            p2 = coords[-1]
+            vec = p2 - p1
+            length = float(np.hypot(*vec))
+            if length < 0.2:
+                continue
+            u = vec / length
+            if u[0] < 0 or (abs(u[0]) < 1e-6 and u[1] < 0):
+                u = -u
+                p1, p2 = p2, p1
+            angle = float(np.degrees(np.arctan2(u[1], u[0])) % 180)
+            segments.append({
+                "p1": p1, "p2": p2, "u": u, "length": length,
+                "angle": angle, "mid": (p1 + p2) / 2.0, "pts": [p1, p2]
+            })
+
+        n = len(segments)
+        parent = list(range(n))
+        def find(i):
+            if parent[i] == i: return i
+            parent[i] = find(parent[i])
+            return parent[i]
+        def union(i, j):
+            root_i = find(i)
+            root_j = find(j)
+            if root_i != root_j:
+                parent[root_i] = root_j
+
+        for i in range(n):
+            s1 = segments[i]
+            for j in range(i + 1, n):
+                s2 = segments[j]
+                diff_ang = abs(s1["angle"] - s2["angle"])
+                if diff_ang > 90:
+                    diff_ang = abs(180 - diff_ang)
+
+                is_both_horiz = (s1["angle"] <= 15 or s1["angle"] >= 165) and (s2["angle"] <= 15 or s2["angle"] >= 165)
+                is_both_vert = (75 <= s1["angle"] <= 105) and (75 <= s2["angle"] <= 105)
+                angle_tol = 15.0 if (is_both_horiz or is_both_vert) else max_angle_diff
+                if diff_ang > angle_tol:
+                    continue
+
+                d_mid = s2["mid"] - s1["mid"]
+                normal = np.array([-s1["u"][1], s1["u"][0]])
+                lat_dist = abs(float(np.dot(d_mid, normal)))
+                if lat_dist > max_dist:
+                    continue
+
+                proj_s1_1 = float(np.dot(s1["p1"], s1["u"]))
+                proj_s1_2 = float(np.dot(s1["p2"], s1["u"]))
+                min_s1, max_s1 = min(proj_s1_1, proj_s1_2), max(proj_s1_1, proj_s1_2)
+
+                proj_s2_1 = float(np.dot(s2["p1"], s1["u"]))
+                proj_s2_2 = float(np.dot(s2["p2"], s1["u"]))
+                min_s2, max_s2 = min(proj_s2_1, proj_s2_2), max(proj_s2_1, proj_s2_2)
+
+                gap = max(0.0, max(min_s1, min_s2) - min(max_s1, max_s2))
+                if gap <= 1.5:
+                    union(i, j)
+
+        groups = {}
+        for i in range(n):
+            root = find(i)
+            groups.setdefault(root, []).append(segments[i])
+
+        merged_lines = []
+        for root, segs in groups.items():
+            all_pts = []
+            for s in segs:
+                all_pts.extend(s["pts"])
+            all_pts = np.array(all_pts)
+            mean = np.mean(all_pts, axis=0)
+            cov = np.cov(all_pts.T)
+            if cov.ndim == 0 or len(all_pts) == 2:
+                p1 = segs[0]["p1"]
+                p2 = segs[0]["p2"]
+                merged_lines.append(LineString([(round(p1[0], 3), round(p1[1], 3)), (round(p2[0], 3), round(p2[1], 3))]))
+                continue
+
+            eigvals, eigvecs = np.linalg.eigh(cov)
+            v = eigvecs[:, -1]
+            projs = (all_pts - mean) @ v
+            p1 = mean + np.min(projs) * v
+            p2 = mean + np.max(projs) * v
+            merged_lines.append(LineString([(round(p1[0], 3), round(p1[1], 3)), (round(p2[0], 3), round(p2[1], 3))]))
+
+        return merged_lines
+
+    def extract_divisas(self, full_partition, quadra_cnt, origin_bbox, quadra_code, bairro, h_img):
+        """
+        Extrai o traçado completo das linhas (LineString) sem gerar polígonos individuais
+        e sem linhas duplicadas paralelas (Zero Gap real).
         """
         bx, by, bw, bh = origin_bbox
         m_per_px = self.meters_per_pixel
 
-        # Unir todas as fronteiras dos lotes com unary_union (noding planar exato)
-        lot_boundaries = [p.exterior for _, p, _ in lot_polys]
-        noded_network = unary_union(lot_boundaries)
+        # 1. Perímetro da quadra em metros e coordenadas
+        quadra_poly = self.to_metric_polygon(quadra_cnt, origin_bbox, buffer_snap=False)
+        quadra_line = LineString(quadra_poly.exterior.coords)
 
-        if noded_network.geom_type == 'MultiLineString':
-            segments = list(noded_network.geoms)
-        elif noded_network.geom_type == 'LineString':
-            segments = [noded_network]
-        elif noded_network.geom_type == 'GeometryCollection':
-            segments = []
-            for g in noded_network.geoms:
-                if g.geom_type == 'LineString':
-                    segments.append(g)
-                elif g.geom_type == 'MultiLineString':
-                    segments.extend(list(g.geoms))
-        else:
-            segments = []
+        # 2. Extração das divisas internas a partir das interfaces do full_partition
+        shift_r = full_partition[:, 1:]
+        orig_r = full_partition[:, :-1]
+        shift_d = full_partition[1:, :]
+        orig_d = full_partition[:-1, :]
 
+        pairs = set()
+        for a, b in zip(orig_r.flat, shift_r.flat):
+            if a != b and a > 0 and b > 0:
+                pairs.add(tuple(sorted((int(a), int(b)))) )
+        for a, b in zip(orig_d.flat, shift_d.flat):
+            if a != b and a > 0 and b > 0:
+                pairs.add(tuple(sorted((int(a), int(b)))) )
+
+        raw_segments = []
+        for i, j in sorted(pairs):
+            mask_v = ((orig_r == i) & (shift_r == j)) | ((orig_r == j) & (shift_r == i))
+            y_v, x_v = np.where(mask_v)
+            pts_v = list(zip(x_v + 0.5, y_v.astype(float)))
+
+            mask_h = ((orig_d == i) & (shift_d == j)) | ((orig_d == j) & (shift_d == i))
+            y_h, x_h = np.where(mask_h)
+            pts_h = list(zip(x_h.astype(float), y_h + 0.5))
+
+            all_pts = np.array(pts_v + pts_h)
+            if len(all_pts) < 6:
+                continue
+
+            mean = np.mean(all_pts, axis=0)
+            cov = np.cov(all_pts.T)
+            if cov.ndim == 0:
+                continue
+            eigvals, eigvecs = np.linalg.eigh(cov)
+            v = eigvecs[:, -1]
+            projs = (all_pts - mean) @ v
+            p1 = mean + np.min(projs) * v
+            p2 = mean + np.max(projs) * v
+
+            length_px = np.hypot(*(p2 - p1))
+            if length_px * m_per_px < 0.8:
+                continue
+
+            mx1 = (p1[0] - bx) * m_per_px
+            my1 = (bh - (p1[1] - by)) * m_per_px
+            mx2 = (p2[0] - bx) * m_per_px
+            my2 = (bh - (p2[1] - by)) * m_per_px
+
+            raw_segments.append(LineString([(round(mx1, 3), round(my1, 3)), (round(mx2, 3), round(my2, 3))]))
+
+        # 3. Mesclar segmentos colineares contíguos (ex: espinha central e divisas contínuas)
+        merged_lines = self.merge_collinear_lines(raw_segments, max_angle_diff=6.0, max_dist=1.20)
+
+        # 4. Snap topológico:
+        # A) Snap nos limites externos da quadra
+        snapped_lines = []
+        for l in merged_lines:
+            coords = list(l.coords)
+            p_s = Point(coords[0])
+            p_e = Point(coords[-1])
+            if quadra_line.distance(p_s) < 0.80:
+                p_s = nearest_points(quadra_line, p_s)[0]
+            if quadra_line.distance(p_e) < 0.80:
+                p_e = nearest_points(quadra_line, p_e)[0]
+            snapped_lines.append(LineString([(round(p_s.x, 3), round(p_s.y, 3)), (round(p_e.x, 3), round(p_e.y, 3))]))
+
+        # B) Snap entre divisas internas adjacentes (junções em T perfeitas)
+        final_internal = []
+        for idx, l in enumerate(snapped_lines):
+            coords = list(l.coords)
+            p_s = Point(coords[0])
+            p_e = Point(coords[-1])
+            for other_idx, other_l in enumerate(snapped_lines):
+                if idx == other_idx:
+                    continue
+                if quadra_line.distance(p_s) > 0.1 and other_l.distance(p_s) < 0.50:
+                    p_s = nearest_points(other_l, p_s)[0]
+                if quadra_line.distance(p_e) > 0.1 and other_l.distance(p_e) < 0.50:
+                    p_e = nearest_points(other_l, p_e)[0]
+
+            seg = LineString([(round(p_s.x, 3), round(p_s.y, 3)), (round(p_e.x, 3), round(p_e.y, 3))])
+            if seg.length >= 2.5:
+                final_internal.append(seg)
+
+        # 5. Montar registros de linhas com atributos
         divisa_records = []
         divisa_features_pixel = []
-        tol_touch = 1.5 * m_per_px
 
-        for idx, seg in enumerate(segments, start=1):
-            mid = seg.interpolate(0.5, normalized=True)
-            touching = [num for num, p, _ in lot_polys if p.exterior.distance(mid) <= tol_touch]
+        # Adicionar o perímetro da quadra como linha
+        perim_len = round(quadra_line.length, 2)
+        quadra_coords_px = []
+        cv_pts_quadra = []
+        for mx, my in quadra_line.coords:
+            px = bx + mx / m_per_px
+            py = by + bh - (my / m_per_px)
+            quadra_coords_px.append([round(float(px), 1), round(float(h_img - py), 1)])
+            cv_pts_quadra.append([int(round(px)), int(round(py))])
 
+        divisa_records.append({
+            "ID_LINHA": "LIN-001",
+            "QUADRA": quadra_code,
+            "BAIRRO": bairro,
+            "TIPO": "PERIMETRO",
+            "COMPR_M": perim_len,
+            "geometry": quadra_line,
+            "cv_pts": cv_pts_quadra
+        })
+
+        divisa_features_pixel.append({
+            "type": "Feature",
+            "properties": {
+                "TIPO": "DIVISA",
+                "ID": "LIN-001",
+                "TIPO_DIVISA": "Perímetro da Quadra",
+                "COMPR_M": perim_len,
+                "COLOR": "#0284c7"
+            },
+            "geometry": {
+                "type": "LineString",
+                "coordinates": quadra_coords_px
+            }
+        })
+
+        # Adicionar as divisas internas
+        for idx, seg in enumerate(final_internal, start=2):
+            id_linha = f"LIN-{idx:03d}"
             length_m = round(seg.length, 2)
             coords = list(seg.coords)
-            p0 = coords[0]
-            p1 = coords[-1]
-            dx = p1[0] - p0[0]
-            dy = p1[1] - p0[1]
+            dx = coords[-1][0] - coords[0][0]
+            dy = coords[-1][1] - coords[0][1]
             angle = abs(np.arctan2(dy, dx) * 180 / np.pi)
+            if angle > 90: angle = 180 - angle
 
-            if len(touching) >= 2:
-                lote_a = touching[0]
-                lote_b = touching[1]
-                tipo = "DIVISA_LATERAL" if (45 <= angle <= 135) else "DIVISA_FUNDOS"
-                tipo_descr = "Divisa Lateral" if tipo == "DIVISA_LATERAL" else "Divisa de Fundos"
-            elif len(touching) == 1:
-                lote_a = touching[0]
-                lote_b = "LOGRADOURO"
-                tipo = "TESTADA_FRONTAL"
-                tipo_descr = "Testada Frontal (Rua)"
+            if angle < 20:
+                tipo = "DIVISA_ESPINHA" if length_m > 40 else "DIVISA_HORIZONTAL"
+                tipo_descr = "Espinha Central" if length_m > 40 else "Divisa de Lote"
             else:
-                lote_a = "EXTERNO"
-                lote_b = "EXTERNO"
-                tipo = "PERIMETRO"
-                tipo_descr = "Perímetro da Quadra"
+                tipo = "DIVISA_VERTICAL"
+                tipo_descr = "Divisa Lateral de Lote"
 
-            id_linha = f"LIN-{idx:03d}"
-
-            # Coordenadas em pixel para Leaflet (Y invertido) e OpenCV preview
             coords_pixel = []
             cv_pts = []
             for mx, my in coords:
@@ -390,8 +612,6 @@ class QuadraProcessor:
                 "QUADRA": quadra_code,
                 "BAIRRO": bairro,
                 "TIPO": tipo,
-                "LOTE_A": lote_a,
-                "LOTE_B": lote_b,
                 "COMPR_M": length_m,
                 "geometry": seg,
                 "cv_pts": cv_pts
@@ -403,8 +623,6 @@ class QuadraProcessor:
                     "TIPO": "DIVISA",
                     "ID": id_linha,
                     "TIPO_DIVISA": tipo_descr,
-                    "LOTE_A": lote_a,
-                    "LOTE_B": lote_b,
                     "COMPR_M": length_m,
                     "COLOR": "#ef4444"
                 },
@@ -418,7 +636,7 @@ class QuadraProcessor:
             gdf_divisas = gpd.GeoDataFrame(divisa_records, crs=f"EPSG:{self.epsg}")
         else:
             gdf_divisas = gpd.GeoDataFrame(
-                columns=["ID_LINHA", "QUADRA", "BAIRRO", "TIPO", "LOTE_A", "LOTE_B", "COMPR_M", "geometry"],
+                columns=["ID_LINHA", "QUADRA", "BAIRRO", "TIPO", "COMPR_M", "geometry"],
                 crs=f"EPSG:{self.epsg}"
             )
 
@@ -499,66 +717,18 @@ class QuadraProcessor:
 
         quadra_poly = self.to_metric_polygon(quadra_cnt, origin_bbox, buffer_snap=False)
 
-        lot_records = []
-        pixel_features = []
-
-        # Adicionar Quadra no GeoJSON de Pixel para overlay
-        pixel_features.append({
-            "type": "Feature",
-            "properties": {
-                "TIPO": "QUADRA",
-                "ID": quadra_code,
-                "AREA_M2": round(quadra_poly.area, 2),
-                "PERIM_M": round(quadra_poly.length, 2),
-                "COLOR": "#0284c7"
-            },
-            "geometry": {
-                "type": "Polygon",
-                "coordinates": [self.to_pixel_polygon(quadra_cnt, h_img)]
-            }
-        })
-
-        lot_polys = []
-        for i, cnt in enumerate(lot_cnts, start=1):
-            p = self.to_metric_polygon(cnt, origin_bbox, buffer_snap=False)
-            if p.area >= self.min_lot_area_m2:
-                num_lote = lot_id_map.get(i, f"{i:02d}")
-                lot_polys.append((num_lote, p, cnt))
-                lot_records.append({
-                    "NUM_LOTE": num_lote,
-                    "QUADRA": quadra_code,
-                    "BAIRRO": bairro,
-                    "AREA_M2": round(p.area, 2),
-                    "PERIM_M": round(p.length, 2),
-                    "geometry": p
-                })
-                M = cv2.moments(cnt)
-                if M["m00"] > 0:
-                    cx = float(M["m10"] / M["m00"])
-                    cy = float(M["m01"] / M["m00"])
-                    pixel_features.append({
-                        "type": "Feature",
-                        "properties": {
-                            "TIPO": "ROTULO_LOTE",
-                            "ID": num_lote
-                        },
-                        "geometry": {
-                            "type": "Point",
-                            "coordinates": [round(cx, 1), round(float(h_img - cy), 1)]
-                        }
-                    })
-
-        # 3. Extrair a geometria de linhas (divisas cadastrais e testadas com topologia noded perfeita)
+        # 3. Extrair a geometria de linhas limpa do traçado dos lotes (Zero Gap, Zero duplicatas)
         gdf_divisas, divisa_features_pixel = self.extract_divisas(
-            lot_polys=lot_polys,
+            full_partition=full_partition,
+            quadra_cnt=quadra_cnt,
             origin_bbox=origin_bbox,
             quadra_code=quadra_code,
             bairro=bairro,
             h_img=h_img
         )
 
-        # Adicionar as feições de divisas (Linhas Vermelhas) no GeoJSON para o visualizador
-        pixel_features.extend(divisa_features_pixel)
+        # GeoJSON de Pixel para overlay Leaflet (apenas linhas do traçado)
+        pixel_features = list(divisa_features_pixel)
 
         # Montar GeoDataFrames
         gdf_quadra = gpd.GeoDataFrame([{
@@ -566,39 +736,24 @@ class QuadraProcessor:
             "BAIRRO": bairro,
             "AREA_M2": round(quadra_poly.area, 2),
             "PERIM_M": round(quadra_poly.length, 2),
-            "QTD_LOTES": len(lot_records),
+            "TOTAL_LINHAS": len(gdf_divisas),
             "ESCALA": f"1:{int(self.scale_denom)}",
             "geometry": quadra_poly
         }], crs=f"EPSG:{self.epsg}")
 
-        if lot_records:
-            gdf_lots = gpd.GeoDataFrame(lot_records, crs=f"EPSG:{self.epsg}")
-        else:
-            gdf_lots = gpd.GeoDataFrame(columns=["NUM_LOTE", "QUADRA", "BAIRRO", "AREA_M2", "PERIM_M", "geometry"], crs=f"EPSG:{self.epsg}")
+        gdf_lots = gpd.GeoDataFrame(columns=["NUM_LOTE", "geometry"], crs=f"EPSG:{self.epsg}")
 
-        # Gerar imagem de preview destacando o traçado das divisas em vermelho sobre a planta original (sem preenchimento de polígonos)
+        # Gerar imagem de preview destacando o traçado das divisas em vermelho sobre a planta original
         vis = img.copy()
         cv2.drawContours(vis, [quadra_cnt], -1, (255, 120, 0), 2)
 
-        # Traçar linhas vermelhas de divisas no preview
+        # Traçar linhas vermelhas de divisas no preview (sem badges ou números de lote)
         for _, row in gdf_divisas.iterrows():
             cv_pts = row.get("cv_pts")
             if cv_pts and len(cv_pts) >= 2:
                 pts_arr = np.array(cv_pts, dtype=np.int32).reshape((-1, 1, 2))
                 cv2.polylines(vis, [pts_arr], False, (0, 0, 255), 2)
 
-        # Desenhar numeração dos lotes no centroide com badge limpo
-        for i, cnt in enumerate(lot_cnts, start=1):
-            num_str = lot_id_map.get(i, f"{i:02d}")
-            M = cv2.moments(cnt)
-            if M["m00"] > 0:
-                cx = int(M["m10"] / M["m00"])
-                cy = int(M["m01"] / M["m00"])
-                cv2.circle(vis, (cx, cy), 13, (255, 255, 255), -1)
-                cv2.circle(vis, (cx, cy), 13, (0, 0, 200), 1)
-                cv2.putText(vis, num_str, (cx - 8, cy + 5), cv2.FONT_HERSHEY_SIMPLEX, 0.40, (0, 0, 160), 1, cv2.LINE_AA)
-
-        area_media_lote = round(sum(l["AREA_M2"] for l in lot_records) / max(1, len(lot_records)), 2)
         extensao_divisas_m = round(float(gdf_divisas["COMPR_M"].sum()), 2) if not gdf_divisas.empty else 0.0
 
         stats = {
@@ -606,8 +761,6 @@ class QuadraProcessor:
             "bairro": bairro or "Não informado",
             "quadra_area_m2": round(quadra_poly.area, 2),
             "quadra_perim_m": round(quadra_poly.length, 2),
-            "total_lots": len(lot_records),
-            "area_media_lote_m2": area_media_lote,
             "total_divisas": len(gdf_divisas),
             "extensao_divisas_m": extensao_divisas_m,
             "scale": f"1:{int(self.scale_denom)}",
