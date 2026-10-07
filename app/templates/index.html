@@ -351,6 +351,7 @@
     let quadraLayer = null;
     let lotsLayer = null;
     let divisasLayer = null;
+    let divisaLayersMap = {};
     let labelMarkers = [];
     let currentImageDimensions = [1000, 1000];
 
@@ -537,10 +538,12 @@
       document.getElementById('statsCard').classList.remove('hidden');
 
       // Atualizar métricas do sidebar
-      document.getElementById('statAreaQuadra').innerText = Number(data.stats.quadra_area_m2).toLocaleString('pt-BR') + ' m²';
-      document.getElementById('statTotalLots').innerText = data.stats.total_lots;
-      document.getElementById('statPerimQuadra').innerText = Number(data.stats.quadra_perim_m).toLocaleString('pt-BR') + ' m';
-      document.getElementById('statAreaMediaLote').innerText = Number(data.stats.area_media_lote_m2 || 0).toLocaleString('pt-BR') + ' m²';
+      if (document.getElementById('statAreaQuadra') && data.stats.quadra_area_m2 !== undefined) {
+        document.getElementById('statAreaQuadra').innerText = Number(data.stats.quadra_area_m2).toLocaleString('pt-BR') + ' m²';
+      }
+      if (document.getElementById('statPerimQuadra') && data.stats.quadra_perim_m !== undefined) {
+        document.getElementById('statPerimQuadra').innerText = Number(data.stats.quadra_perim_m).toLocaleString('pt-BR') + ' m';
+      }
       if (document.getElementById('statTotalDivisas')) {
         document.getElementById('statTotalDivisas').innerText = data.stats.total_divisas || (data.divisas ? data.divisas.length : 0);
       }
@@ -548,7 +551,9 @@
         document.getElementById('statExtensaoDivisas').innerText = Number(data.stats.extensao_divisas_m || 0).toLocaleString('pt-BR') + ' m';
       }
       const totalLinhas = data.divisas ? data.divisas.length : (data.stats.total_divisas || 0);
-      document.getElementById('tabCount').innerText = totalLinhas;
+      if (document.getElementById('tabCount')) {
+        document.getElementById('tabCount').innerText = totalLinhas;
+      }
 
       // Dimensões da imagem original
       const [w, h] = data.stats.dimensions_px;
@@ -719,28 +724,14 @@
         map.removeLayer(rasterOverlay);
       }
     }
-    function toggleQuadraLayer() {
-      if (!quadraLayer) return;
-      if (document.getElementById('chkQuadra').checked) {
-        map.addLayer(quadraLayer);
-      } else {
-        map.removeLayer(quadraLayer);
-      }
-    }
     function toggleDivisasLayer() {
       if (!divisasLayer) return;
-      if (document.getElementById('chkDivisas').checked) {
+      const chk = document.getElementById('chkDivisas');
+      if (chk && chk.checked) {
         map.addLayer(divisasLayer);
       } else {
         map.removeLayer(divisasLayer);
       }
-    }
-    function toggleLabelsLayer() {
-      const show = document.getElementById('chkLabels').checked;
-      labelMarkers.forEach(m => {
-        if (show) map.addLayer(m);
-        else map.removeLayer(m);
-      });
     }
 
     function downloadFormat(fmt) {
